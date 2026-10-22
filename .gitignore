@@ -1,0 +1,11 @@
+# Arduino / Wokwi build output
+build/
+.pio/
+.arduino/
+wokwi.vcd
+
+# Editors and operating systems
+.vscode/.browse.c_cpp.db*
+.vscode/ipch/
+.DS_Store
+Thumbs.db

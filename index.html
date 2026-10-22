@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f8fc">
+  <meta name="description" content="SpineAlign posture monitoring dashboard for live neck and back angle readings.">
+  <title>SpineAlign — Posture Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="#overview" aria-label="SpineAlign home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none"><path d="M12 7.5c4.8 0 5.2 4.2 8 4.2s3.2-4.2 8-4.2M10 16.5c5 0 6 4.2 10 4.2s5-4.2 10-4.2M12 25.5c4.8 0 5.2 4.2 8 4.2s3.2-4.2 8-4.2" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="20" cy="6" r="2" fill="currentColor"/><circle cx="20" cy="34" r="2" fill="currentColor"/></svg>
+        </span>
+        <span class="brand-copy"><strong>SpineAlign</strong><small>POSTURE MONITOR</small></span>
+      </a>
+
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav class="side-nav">
+        <a class="nav-link active" href="#overview"><span class="nav-icon" aria-hidden="true">⌂</span><span>Dashboard</span></a>
+        <a class="nav-link" href="#sensors"><span class="nav-icon" aria-hidden="true">⌁</span><span>Sensor readings</span></a>
+        <a class="nav-link" href="#device"><span class="nav-icon" aria-hidden="true">⌘</span><span>Device connection</span></a>
+        <a class="nav-link" href="#future"><span class="nav-icon" aria-hidden="true">◇</span><span>3D posture view</span><span class="nav-soon">SOON</span></a>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-device-card">
+        <div class="sidebar-device-top"><span class="mini-status-dot" id="sideDot"></span><span id="sideConnectionText">Demo data active</span></div>
+        <div class="sidebar-device-title">Your posture companion</div>
+        <p>Two sensor points. One clearer picture of your posture.</p>
+        <a href="#device" class="text-link">Device settings <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="sidebar-footer"><span class="footer-pulse"></span> SpineAlign Lite <span class="footer-version">v1.0</span></div>
+    </aside>
+
+    <main class="main-content" id="overview">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong>Dashboard</strong></div>
+        <div class="topbar-actions">
+          <div class="connection-pill" id="connectionPill"><span class="mini-status-dot"></span><span id="topConnectionText">Demo mode</span></div>
+          <button class="button button-primary" id="connectBtn" type="button"><span class="button-symbol" aria-hidden="true">↗</span><span id="connectBtnText">Connect device</span></button>
+        </div>
+      </header>
+
+      <section class="welcome-section">
+        <div>
+          <div class="eyebrow"><span class="eyebrow-line"></span> YOUR POSTURE, AT A GLANCE</div>
+          <h1>A little more <span class="title-accent">alignment.</span></h1>
+          <p class="welcome-copy">Keep an eye on your neck and back angles, and catch slouching before it becomes a habit.</p>
+        </div>
+        <div class="welcome-art" aria-hidden="true">
+          <div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div>
+          <div class="art-center"><svg viewBox="0 0 78 78" fill="none"><path d="M40 13c-9 0-14 6-14 13 0 5 3 8 7 10l-2 8c-1 5 1 8 6 10l7 4 1 8" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M41 14c7 1 11 6 11 12 0 6-4 10-10 11l-2 8c0 3 2 5 6 7l7 4" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".5"/><circle cx="27" cy="26" r="5" fill="#ffbd6c"/><circle cx="39" cy="49" r="5" fill="#51c7bb"/><path d="M27 26 39 49" stroke="#7d86fb" stroke-width="2.5" stroke-dasharray="3 4"/></svg></div>
+          <span class="art-label label-neck">NECK</span><span class="art-label label-back">BACK</span>
+        </div>
+      </section>
+
+      <section class="overview-grid" aria-label="Current posture overview">
+        <article class="card status-card" id="statusCard">
+          <div class="card-topline"><span class="card-label">OVERALL POSTURE</span><span class="status-icon good" id="statusIcon" aria-hidden="true">✓</span></div>
+          <div class="status-main"><h2 id="statusTitle">Looking good</h2><span class="status-badge good" id="statusBadge">Within range</span></div>
+          <p class="card-description" id="statusDescription">Both sensors are below the 15° alert threshold.</p>
+          <div class="status-foot"><span class="tiny-check" id="statusFootIcon">✓</span><span id="statusFootText">You're in your target range</span></div>
+          <div class="status-decoration" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        </article>
+
+        <article class="card angle-summary-card neck-summary-card">
+          <div class="sensor-card-heading"><span class="sensor-icon neck-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="5" r="3"/><path d="M12 9v5m-4 7 4-7 4 7m-7-5h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><div class="card-label">NECK ANGLE</div><div class="sensor-subtitle">Sensor 01 <span class="sensor-live-dot" id="neckDot"></span></div></div><span class="sensor-status-text" id="neckRangeLabel">In range</span></div>
+          <div class="angle-reading"><span id="neckAngle">+5.2</span><span class="angle-unit">°</span></div>
+          <div class="angle-caption">Deviation from your reference</div>
+          <div class="threshold-track" aria-label="Neck angle deviation compared with threshold"><div class="threshold-fill neck-fill" id="neckFill"></div><span class="threshold-marker"></span><span class="threshold-end"></span></div>
+          <div class="threshold-labels"><span>0° baseline</span><span>15° threshold</span></div>
+        </article>
+
+        <article class="card angle-summary-card back-summary-card">
+          <div class="sensor-card-heading"><span class="sensor-icon back-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3c-3 2-4 5-3 8l-2 4 2 6m3-18c3 2 4 5 3 8l2 4-2 6m-5-13h4m-4 4h4m-4 4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><div class="card-label">BACK ANGLE</div><div class="sensor-subtitle">Sensor 02 <span class="sensor-live-dot" id="backDot"></span></div></div><span class="sensor-status-text" id="backRangeLabel">In range</span></div>
+          <div class="angle-reading"><span id="backAngle">+8.7</span><span class="angle-unit">°</span></div>
+          <div class="angle-caption">Deviation from your reference</div>
+          <div class="threshold-track" aria-label="Back angle deviation compared with threshold"><div class="threshold-fill back-fill" id="backFill"></div><span class="threshold-marker"></span><span class="threshold-end"></span></div>
+          <div class="threshold-labels"><span>0° baseline</span><span>15° threshold</span></div>
+        </article>
+      </section>
+
+      <section class="content-grid" id="sensors">
+        <article class="card trend-card">
+          <div class="section-heading-row">
+            <div><div class="card-label">ANGLE HISTORY</div><h2>Posture over time</h2><p class="section-subtitle">See how your neck and back angles change.</p></div>
+            <div class="chart-legend"><span><i class="legend-dot neck-legend"></i>Neck</span><span><i class="legend-dot back-legend"></i>Back</span></div>
+          </div>
+          <div class="chart-wrap"><canvas id="angleChart" role="img" aria-label="Recent neck and back angle deviation history chart"></canvas><div class="chart-empty" id="chartEmpty" hidden>Waiting for readings…</div></div>
+          <div class="chart-footer"><span><span class="footer-live-dot"></span><span id="chartModeText">Demo readings</span></span><span>Alert threshold <strong>15°</strong></span></div>
+        </article>
+
+        <article class="card device-card" id="device">
+          <div class="section-heading-row"><div><div class="card-label">DEVICE STATUS</div><h2>Connected hardware</h2></div><span class="device-illustration" aria-hidden="true"><svg viewBox="0 0 58 58" fill="none"><rect x="12" y="7" width="34" height="44" rx="7" fill="#e8edff" stroke="#8a9af7" stroke-width="1.5"/><rect x="19" y="14" width="20" height="19" rx="3" fill="#c8d1ff"/><circle cx="29" cy="23.5" r="5" fill="#727ff0"/><path d="M20 39h18M20 44h9" stroke="#929ff7" stroke-width="2" stroke-linecap="round"/><path d="M7 15v28m44-28v28" stroke="#a5aef5" stroke-width="2" stroke-linecap="round"/></svg></span></div>
+          <div class="device-status-row"><span class="device-status-icon" id="deviceStatusIcon">⌁</span><div><strong id="deviceStatusTitle">Running in demo mode</strong><p id="deviceStatusSubtitle">Example values are shown so you can explore the dashboard.</p></div></div>
+          <div class="device-divider"></div>
+          <div class="device-detail-row"><span>Sensor 01 · Neck</span><span class="detail-value"><i class="tiny-indicator" id="neckDeviceIndicator"></i><span id="neckDeviceStatus">Simulated</span></span></div>
+          <div class="device-detail-row"><span>Sensor 02 · Back</span><span class="detail-value"><i class="tiny-indicator" id="backDeviceIndicator"></i><span id="backDeviceStatus">Simulated</span></span></div>
+          <div class="device-detail-row"><span>Connection</span><span class="detail-value" id="connectionType">Demo mode</span></div>
+          <div class="device-actions"><button class="button button-primary button-wide" id="deviceConnectBtn" type="button">Connect ESP32</button><button class="button button-secondary button-wide" id="calibrateBtn" type="button">Calibrate sensors</button></div>
+          <p class="device-note" id="deviceNote">For live data, connect your ESP32 over USB in a desktop Chromium browser.</p>
+        </article>
+      </section>
+
+      <section class="sensor-detail-grid" aria-label="Sensor details">
+        <article class="sensor-detail-card neck-detail"><div class="detail-card-title"><span class="detail-number">01</span><div><h3>Neck sensor</h3><p>Tracks forward or backward head tilt.</p></div><span class="detail-angle" id="neckDetailAngle">+5.2°</span></div><div class="detail-meter"><span id="neckMeter" style="width:17.3%"></span></div><div class="detail-meta"><span>Current deviation</span><span>15° trigger point</span></div></article>
+        <article class="sensor-detail-card back-detail"><div class="detail-card-title"><span class="detail-number">02</span><div><h3>Back sensor</h3><p>Tracks lean through your back.</p></div><span class="detail-angle" id="backDetailAngle">+8.7°</span></div><div class="detail-meter"><span id="backMeter" style="width:29%"></span></div><div class="detail-meta"><span>Current deviation</span><span>15° trigger point</span></div></article>
+      </section>
+
+      <section class="future-card" id="future">
+        <div class="future-visual" aria-hidden="true"><div class="future-body"><span class="body-head"></span><span class="body-neck"></span><span class="body-spine"></span><span class="body-joint joint-neck"></span><span class="body-joint joint-back"></span><span class="body-shoulders"></span><span class="body-hips"></span></div><span class="future-tag tag-one"><i></i> Neck sensor</span><span class="future-tag tag-two"><i></i> Back sensor</span></div>
+        <div class="future-copy"><span class="future-pill"><span class="sparkle">✦</span> ON THE ROADMAP</span><h2>A live 3D view of your posture.</h2><p>The next step is a 3D model with two independently tracked points. As the sensors move, the neck and back sections will tilt to reflect your posture in real time.</p><div class="future-chips"><span>01 · Neck orientation</span><span>02 · Back orientation</span><span>Live sensor mapping</span></div></div>
+        <div class="future-corner" aria-hidden="true">↗</div>
+      </section>
+
+      <footer class="page-footer"><span><span class="footer-pulse"></span> SpineAlign Lite <span class="footer-version">· Prototype dashboard</span></span><span>Measurements are relative to the calibrated reference. <a href="https://github.com/AdityaB411/SpineAlign" target="_blank" rel="noopener noreferrer">View project on GitHub ↗</a></span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <noscript><div class="noscript-note">Enable JavaScript to display sensor readings and the angle history chart.</div></noscript>
+</body>
+</html>

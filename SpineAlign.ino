@@ -169,7 +169,8 @@ bool mpuPresent(uint8_t address)
   uint8_t whoAmI = 0;
   if (!mpuReadRegisters(address, MPU_WHO_AM_I, &whoAmI, 1))
     return false;
-  return whoAmI == 0x68;
+  // Accept MPU6050 (0x68) and compatible MPU6500-family modules (0x70) observed in this project.
+  return whoAmI == 0x68 || whoAmI == 0x70;
 }
 
 bool mpuInit(uint8_t address)

@@ -53,3 +53,5 @@ The dashboard uses the existing [CC0 1.0 human model](https://github.com/UMRAM-B
 The updated firmware telemetry retains scalar `N` and `B` and adds `NP`, `NR`, `BP`, and `BR` orientation, `CAL` calibration state, and `BAT`, `PCT`, `CHG`, and `FULL` battery fields. The default Wokwi profile reports battery data as unavailable. For physical hardware, enable the ESP32-CAM profile and wire the battery divider / TP4056 status output as described in [Hardware, orientation and battery notes](docs/Hardware_Orientation_Battery.md).
 
 Battery percentage is a rough voltage estimate. TP4056 CHRG is active-low and open-drain; by itself it cannot distinguish an unplugged charger from a completed charge. The 3D mapping also depends on IMU mounting and axis signs, so validate both on real hardware.
+
+The raw-I²C sensor setup accepts both the common MPU6050 `WHO_AM_I=0x68` and compatible MPU6500-family modules that report `0x70`. Axis direction and sensor register compatibility still need to be verified on the specific modules fitted to the wearable.

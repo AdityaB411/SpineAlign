@@ -14,8 +14,8 @@
 #define SCL_PIN 15
 #define ALERT_PIN 2
 #define CALIBRATION_BUTTON_PIN -1
-#define BATTERY_ADC_PIN 34
-#define CHARGER_STATUS_PIN 13
+#define BATTERY_ADC_PIN 13
+#define CHARGER_STATUS_PIN 33
 #define BATTERY_MONITOR_ENABLED 1
 #else
 #define SDA_PIN 21
@@ -259,6 +259,7 @@ void updateBatteryTelemetry()
   batteryVoltage = adcVoltage * BATTERY_VOLTAGE_DIVIDER_RATIO;
   batteryPercent = constrain(voltageToPercent(batteryVoltage), 0, 100);
   // TP4056 CHRG is open-drain and active-low; use a pull-up to 3V3.
+  // ADC2 battery sampling requires the Wi-Fi driver to stay off; Bluetooth serial is compatible.
   batteryCharging = digitalRead(CHARGER_STATUS_PIN) == LOW;
   // CHRG is high-impedance when charging is inactive, including unplugged / complete states.
   batteryFull = !batteryCharging && batteryVoltage >= BATTERY_CHARGE_FULL_VOLTAGE;

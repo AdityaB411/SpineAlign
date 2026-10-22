@@ -41,7 +41,7 @@ The 3D posture model is a planned extension, not a current feature. It will need
 
 The dashboard uses the existing [CC0 1.0 human model](https://github.com/UMRAM-Bilkent/supine-human-model) as source geometry and samples it into a particle silhouette. Three.js drives separate torso and head groups: back pitch/roll tilts the torso, while neck pitch/roll adjusts the head relative to the torso. Four preview sliders let you test movement before the hardware is connected. A lightweight built-in point figure is used if the external model cannot be fetched.
 
-The updated firmware telemetry retains scalar `N` and `B` and adds `NP`, `NR`, `BP`, and `BR` orientation, `CAL` calibration state, and `BAT`, `PCT`, `CHG`, and `FULL` battery fields. The default Wokwi profile reports battery data as unavailable. For physical hardware, enable the ESP32-CAM profile and wire the battery divider / TP4056 status output as described in [Hardware, orientation and battery notes](docs/Hardware_Orientation_Battery.md).
+The updated firmware telemetry retains scalar `N` and `B` and adds `NP`, `NR`, `BP`, and `BR` orientation, `CAL` calibration state, and `BAT`, `PCT`, `CHG`, and `FULL` battery fields. The default Wokwi profile reports battery data as unavailable. For physical hardware, enable the ESP32-CAM profile and wire the battery divider to GPIO13 and TP4056 CHRG to GPIO33 as documented for the selected board as described in [Hardware, orientation and battery notes](docs/Hardware_Orientation_Battery.md).
 
 Battery percentage is a rough voltage estimate. TP4056 CHRG is active-low and open-drain; by itself it cannot distinguish an unplugged charger from a completed charge. The 3D mapping also depends on IMU mounting and axis signs, so validate both on real hardware.
 

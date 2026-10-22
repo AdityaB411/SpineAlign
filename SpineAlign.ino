@@ -3,13 +3,35 @@
 #include <Adafruit_SSD1306.h>
 #include <math.h>
 
+// Set to 1 for the planned AI-Thinker ESP32-CAM physical build.
+// Keep 0 for the existing Wokwi ESP32 DevKit simulation.
+#ifndef SPINEALIGN_TARGET_ESP32_CAM
+#define SPINEALIGN_TARGET_ESP32_CAM 0
+#endif
+
+#if SPINEALIGN_TARGET_ESP32_CAM
+#define SDA_PIN 14
+#define SCL_PIN 15
+#define ALERT_PIN 2
+#define CALIBRATION_BUTTON_PIN -1
+#define BATTERY_ADC_PIN 34
+#define CHARGER_STATUS_PIN 13
+#define BATTERY_MONITOR_ENABLED 1
+#else
 #define SDA_PIN 21
 #define SCL_PIN 23
 #define ALERT_PIN 25
 #define CALIBRATION_BUTTON_PIN 14
+#define BATTERY_ADC_PIN -1
+#define CHARGER_STATUS_PIN -1
+#define BATTERY_MONITOR_ENABLED 0
+#endif
+
 #define NECK_MPU_ADDRESS 0x68
 #define BACK_MPU_ADDRESS 0x69
 #define OLED_ADDRESS 0x3C
+#define BATTERY_VOLTAGE_DIVIDER_RATIO 2.0f
+#define BATTERY_CHARGE_FULL_VOLTAGE 4.15f
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -92,9 +114,14 @@ struct SensorData
   int16_t gx, gy, gz;
 };
 
-KalmanFilter neckFilter, backFilter;
+KalmanFilter neckPitchFilter, neckRollFilter, backPitchFilter, backRollFilter;
 float neckAngle = 0.0f, backAngle = 0.0f;
-float neckZero = 0.0f, backZero = 0.0f;
+float neckPitch = 0.0f, neckRoll = 0.0f, backPitch = 0.0f, backRoll = 0.0f;
+float neckPitchZero = 0.0f, neckRollZero = 0.0f, backPitchZero = 0.0f, backRollZero = 0.0f;
+float batteryVoltage = -1.0f;
+int batteryPercent = -1;
+bool batteryCharging = false, batteryFull = false, batteryTelemetryAvailable = false;
+unsigned long lastBatteryRead = 0;
 bool neckAvailable = false, backAvailable = false;
 bool isCalibrated = false;
 bool badPosture = false, alertActive = false;
@@ -174,35 +201,74 @@ bool mpuReadRaw(uint8_t address, SensorData &data)
   return true;
 }
 
-float calculateAccelerometerAngle(const SensorData &data)
+// Pitch keeps the original firmware's Y-axis tilt convention. Roll is an orthogonal estimate.
+// Validate all axis signs after mounting the sensors in their final orientation.
+float calculatePitchAngle(const SensorData &data)
 {
-  float ax = (float)data.ax;
-  float ay = (float)data.ay;
-  float az = (float)data.az;
-  float denominator = sqrtf((ax * ax) + (az * az));
-  return atan2f(ay, denominator) * 180.0f / PI;
+  float ax = (float)data.ax, ay = (float)data.ay, az = (float)data.az;
+  return atan2f(ay, sqrtf((ax * ax) + (az * az))) * 180.0f / PI;
 }
 
-float calculateGyroscopeRate(const SensorData &data)
+float calculateRollAngle(const SensorData &data)
 {
-  return (float)data.gx / 131.0f;
+  return atan2f(-(float)data.ax, (float)data.az) * 180.0f / PI;
 }
 
-void updateSensor(uint8_t address, KalmanFilter &filter, float &outputAngle,
-                  float zeroAngle, bool &available, float dt)
+float calculatePitchRate(const SensorData &data) { return (float)data.gx / 131.0f; }
+float calculateRollRate(const SensorData &data) { return (float)data.gy / 131.0f; }
+
+void updateSensor(uint8_t address, KalmanFilter &pitchFilter, KalmanFilter &rollFilter,
+                  float &outputPitch, float &outputRoll, float zeroPitch, float zeroRoll,
+                  bool &available, float dt)
 {
   SensorData data;
-  if (!mpuReadRaw(address, data))
-  {
-    available = false;
-    return;
-  }
-
+  if (!mpuReadRaw(address, data)) { available = false; return; }
   available = true;
-  float accelerometerAngle = calculateAccelerometerAngle(data);
-  float gyroRate = calculateGyroscopeRate(data);
-  float filteredAngle = filter.update(accelerometerAngle, gyroRate, dt);
-  outputAngle = filteredAngle - zeroAngle;
+  outputPitch = pitchFilter.update(calculatePitchAngle(data), calculatePitchRate(data), dt) - zeroPitch;
+  outputRoll = rollFilter.update(calculateRollAngle(data), calculateRollRate(data), dt) - zeroRoll;
+}
+
+int voltageToPercent(float voltage)
+{
+  // Rough single-cell Li-ion voltage curve; calibrate with the chosen cell and load.
+  if (voltage <= 3.30f) return 0;
+  if (voltage >= 4.20f) return 100;
+  if (voltage < 3.50f) return (int)roundf((voltage - 3.30f) * 50.0f);
+  if (voltage < 3.60f) return 10 + (int)roundf((voltage - 3.50f) * 100.0f);
+  if (voltage < 3.70f) return 20 + (int)roundf((voltage - 3.60f) * 150.0f);
+  if (voltage < 3.80f) return 35 + (int)roundf((voltage - 3.70f) * 150.0f);
+  if (voltage < 3.90f) return 50 + (int)roundf((voltage - 3.80f) * 200.0f);
+  if (voltage < 4.00f) return 70 + (int)roundf((voltage - 3.90f) * 150.0f);
+  if (voltage < 4.10f) return 85 + (int)roundf((voltage - 4.00f) * 100.0f);
+  return 95 + (int)roundf((voltage - 4.10f) * 50.0f);
+}
+
+void updateBatteryTelemetry()
+{
+#if BATTERY_MONITOR_ENABLED
+  const unsigned long currentTime = millis();
+  if (currentTime - lastBatteryRead < 1000) return;
+  lastBatteryRead = currentTime;
+  uint32_t millivoltSum = 0;
+  for (int i = 0; i < 8; i++) {
+    millivoltSum += analogReadMilliVolts(BATTERY_ADC_PIN);
+    delay(2);
+  }
+  const float adcVoltage = ((float)millivoltSum / 8.0f) / 1000.0f;
+  batteryVoltage = adcVoltage * BATTERY_VOLTAGE_DIVIDER_RATIO;
+  batteryPercent = constrain(voltageToPercent(batteryVoltage), 0, 100);
+  // TP4056 CHRG is open-drain and active-low; use a pull-up to 3V3.
+  batteryCharging = digitalRead(CHARGER_STATUS_PIN) == LOW;
+  // CHRG is high-impedance when charging is inactive, including unplugged / complete states.
+  batteryFull = !batteryCharging && batteryVoltage >= BATTERY_CHARGE_FULL_VOLTAGE;
+  batteryTelemetryAvailable = batteryVoltage > 0.0f && batteryVoltage < 5.0f;
+#else
+  batteryVoltage = -1.0f;
+  batteryPercent = -1;
+  batteryCharging = false;
+  batteryFull = false;
+  batteryTelemetryAvailable = false;
+#endif
 }
 
 void calibrateSensors()
@@ -223,14 +289,16 @@ void calibrateSensors()
     return;
   }
 
-  float neckInitialAngle = calculateAccelerometerAngle(neckData);
-  float backInitialAngle = calculateAccelerometerAngle(backData);
-  neckZero = neckInitialAngle;
-  backZero = backInitialAngle;
-  neckFilter.reset(neckInitialAngle);
-  backFilter.reset(backInitialAngle);
-  neckAngle = 0.0f;
-  backAngle = 0.0f;
+  const float neckInitialPitch = calculatePitchAngle(neckData);
+  const float neckInitialRoll = calculateRollAngle(neckData);
+  const float backInitialPitch = calculatePitchAngle(backData);
+  const float backInitialRoll = calculateRollAngle(backData);
+  neckPitchZero = neckInitialPitch; neckRollZero = neckInitialRoll;
+  backPitchZero = backInitialPitch; backRollZero = backInitialRoll;
+  neckPitchFilter.reset(neckInitialPitch); neckRollFilter.reset(neckInitialRoll);
+  backPitchFilter.reset(backInitialPitch); backRollFilter.reset(backInitialRoll);
+  neckPitch = neckRoll = backPitch = backRoll = 0.0f;
+  neckAngle = backAngle = 0.0f;
   badPosture = false;
   alertActive = false;
   badPostureStartTime = 0;
@@ -480,16 +548,23 @@ void updateOLED()
 
 void sendSerialData()
 {
-  Serial.print("N:");
-  Serial.print(neckAngle, 1);
-  Serial.print(",B:");
-  Serial.print(backAngle, 1);
-  Serial.print(",ALERT:");
-  Serial.println(badPosture ? 1 : 0);
+  Serial.print("N:"); Serial.print(neckAngle, 1);
+  Serial.print(",B:"); Serial.print(backAngle, 1);
+  Serial.print(",NP:"); Serial.print(neckPitch, 1);
+  Serial.print(",NR:"); Serial.print(neckRoll, 1);
+  Serial.print(",BP:"); Serial.print(backPitch, 1);
+  Serial.print(",BR:"); Serial.print(backRoll, 1);
+  Serial.print(",ALERT:"); Serial.print(badPosture ? 1 : 0);
+  Serial.print(",CAL:"); Serial.print(isCalibrated ? 1 : 0);
+  Serial.print(",BAT:"); Serial.print(batteryTelemetryAvailable ? batteryVoltage : -1.0f, 2);
+  Serial.print(",PCT:"); Serial.print(batteryTelemetryAvailable ? batteryPercent : -1);
+  Serial.print(",CHG:"); Serial.print(batteryTelemetryAvailable ? (batteryCharging ? 1 : 0) : -1);
+  Serial.print(",FULL:"); Serial.println(batteryTelemetryAvailable ? (batteryFull ? 1 : 0) : -1);
 }
 
 void checkCalibrationButton()
 {
+#if CALIBRATION_BUTTON_PIN >= 0
   bool currentButtonState = digitalRead(CALIBRATION_BUTTON_PIN);
   unsigned long currentTime = millis();
 
@@ -509,13 +584,21 @@ void checkCalibrationButton()
       lastButtonState = HIGH;
     }
   }
+#endif
 }
 
 void setup()
 {
   pinMode(ALERT_PIN, OUTPUT);
   digitalWrite(ALERT_PIN, LOW);
+#if CALIBRATION_BUTTON_PIN >= 0
   pinMode(CALIBRATION_BUTTON_PIN, INPUT_PULLUP);
+#endif
+#if BATTERY_MONITOR_ENABLED
+  analogReadResolution(12);
+  analogSetPinAttenuation(BATTERY_ADC_PIN, ADC_11db);
+  pinMode(CHARGER_STATUS_PIN, INPUT_PULLUP);
+#endif
   Serial.begin(115200);
   delay(500);
   Serial.println();
@@ -557,6 +640,7 @@ void loop()
   handleSerialCommands();
   checkCalibrationButton();
   updateAlert();
+  updateBatteryTelemetry();
 
   if (currentTime - lastSensorTime >= SENSOR_INTERVAL_MS)
   {
@@ -565,8 +649,12 @@ void loop()
     if (dt <= 0.0f || dt > 0.5f)
       dt = 0.01f;
 
-    updateSensor(NECK_MPU_ADDRESS, neckFilter, neckAngle, neckZero, neckAvailable, dt);
-    updateSensor(BACK_MPU_ADDRESS, backFilter, backAngle, backZero, backAvailable, dt);
+    updateSensor(NECK_MPU_ADDRESS, neckPitchFilter, neckRollFilter, neckPitch, neckRoll,
+                 neckPitchZero, neckRollZero, neckAvailable, dt);
+    updateSensor(BACK_MPU_ADDRESS, backPitchFilter, backRollFilter, backPitch, backRoll,
+                 backPitchZero, backRollZero, backAvailable, dt);
+    neckAngle = sqrtf((neckPitch * neckPitch) + (neckRoll * neckRoll));
+    backAngle = sqrtf((backPitch * backPitch) + (backRoll * backRoll));
     updatePosture();
   }
 

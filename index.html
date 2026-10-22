@@ -8,6 +8,8 @@
   <title>SpineAlign — Posture Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
+  <script type="module" src="orientation3d.js"></script>
+
 </head>
 <body>
   <div class="app-shell">
@@ -24,7 +26,7 @@
         <a class="nav-link active" href="#overview"><span class="nav-icon" aria-hidden="true">⌂</span><span>Dashboard</span></a>
         <a class="nav-link" href="#sensors"><span class="nav-icon" aria-hidden="true">⌁</span><span>Sensor readings</span></a>
         <a class="nav-link" href="#device"><span class="nav-icon" aria-hidden="true">⌘</span><span>Device connection</span></a>
-        <a class="nav-link" href="#future"><span class="nav-icon" aria-hidden="true">◇</span><span>3D posture view</span><span class="nav-soon">SOON</span></a>
+        <a class="nav-link" href="#future"><span class="nav-icon" aria-hidden="true">◇</span><span>3D posture view</span><span class="nav-soon">LIVE</span></a>
       </nav>
 
       <div class="sidebar-spacer"></div>
@@ -85,6 +87,33 @@
         </article>
       </section>
 
+      <section class="card battery-card" id="battery" aria-labelledby="batteryTitle">
+        <div class="battery-main">
+          <div class="battery-heading-row">
+            <span class="battery-symbol" aria-hidden="true"><span id="batteryGlyphFill"></span><i></i></span>
+            <div class="battery-heading-copy">
+              <div class="card-label">POWER & CHARGING</div>
+              <h2 id="batteryTitle">Battery status</h2>
+              <p id="batteryHint">Demo battery values are shown until hardware telemetry is enabled.</p>
+            </div>
+            <span class="battery-status-pill demo" id="batteryStatusPill">Demo preview</span>
+          </div>
+          <div class="battery-level-row">
+            <div class="battery-level-copy"><strong id="batteryPercent">78%</strong><span id="batteryLevelCaption">Estimated charge</span></div>
+            <span class="battery-voltage-chip" id="batteryVoltage">3.87 V</span>
+          </div>
+          <div class="battery-progress-track" role="progressbar" aria-label="Battery charge level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="78" id="batteryProgressTrack">
+            <div class="battery-progress is-demo" id="batteryProgress" style="width:78%"></div>
+          </div>
+        </div>
+        <div class="battery-details">
+          <div class="battery-detail-item"><span>Charging state</span><strong id="chargerState">Demo · Not charging</strong></div>
+          <div class="battery-detail-item"><span>Battery monitor</span><strong id="batteryMonitorState">Demo values</strong></div>
+          <div class="battery-detail-item"><span>Charger feedback</span><strong id="chargerSignalState">Preview only</strong></div>
+          <p class="battery-detail-note">Charge percentage is estimated from battery voltage. Live charging detection requires the TP4056 status pin to be wired to the ESP32.</p>
+        </div>
+      </section>
+
       <section class="content-grid" id="sensors">
         <article class="card trend-card">
           <div class="section-heading-row">
@@ -112,10 +141,48 @@
         <article class="sensor-detail-card back-detail"><div class="detail-card-title"><span class="detail-number">02</span><div><h3>Back sensor</h3><p>Tracks lean through your back.</p></div><span class="detail-angle" id="backDetailAngle">+8.7°</span></div><div class="detail-meter"><span id="backMeter" style="width:29%"></span></div><div class="detail-meta"><span>Current deviation</span><span>15° trigger point</span></div></article>
       </section>
 
-      <section class="future-card" id="future">
-        <div class="future-visual" aria-hidden="true"><div class="future-body"><span class="body-head"></span><span class="body-neck"></span><span class="body-spine"></span><span class="body-joint joint-neck"></span><span class="body-joint joint-back"></span><span class="body-shoulders"></span><span class="body-hips"></span></div><span class="future-tag tag-one"><i></i> Neck sensor</span><span class="future-tag tag-two"><i></i> Back sensor</span></div>
-        <div class="future-copy"><span class="future-pill"><span class="sparkle">✦</span> ON THE ROADMAP</span><h2>A live 3D view of your posture.</h2><p>The next step is a 3D model with two independently tracked points. As the sensors move, the neck and back sections will tilt to reflect your posture in real time.</p><div class="future-chips"><span>01 · Neck orientation</span><span>02 · Back orientation</span><span>Live sensor mapping</span></div></div>
-        <div class="future-corner" aria-hidden="true">↗</div>
+      <section class="model-card" id="future" aria-labelledby="modelSectionTitle">
+        <div class="model-heading-row">
+          <div>
+            <div class="card-label">LIVE ORIENTATION VIEW</div>
+            <h2 id="modelSectionTitle">Posture, in 3D</h2>
+            <p class="section-subtitle">A particle-style human figure with separate back and neck movement.</p>
+          </div>
+          <span class="model-status-pill" id="modelStatusPill"><i></i><span id="modelStatusText">Demo orientation</span></span>
+        </div>
+        <div class="model-layout">
+          <div class="model-stage" id="modelStage">
+            <canvas id="posture3dCanvas" aria-label="Interactive particle human model showing torso and neck orientation"></canvas>
+            <div class="model-loader" id="modelLoading"><span class="model-spinner"></span><span id="modelLoadingText">Loading the human particle model…</span></div>
+            <div class="model-stage-label model-label-neck"><i></i> NECK IMU</div>
+            <div class="model-stage-label model-label-back"><i></i> BACK IMU</div>
+            <div class="model-stage-hint">Drag to rotate · Scroll to zoom</div>
+          </div>
+          <aside class="model-details">
+            <div class="model-readings-heading"><strong>Orientation readings</strong><span id="modelDataMode">DEMO</span></div>
+            <div class="model-reading-card neck-model-reading">
+              <div class="model-reading-name"><span class="model-reading-dot neck-dot"></span><strong>Neck sensor</strong></div>
+              <div class="model-axis-grid"><div><span>Pitch</span><strong id="modelNeckPitch">+4.0°</strong></div><div><span>Roll</span><strong id="modelNeckRoll">+0.8°</strong></div></div>
+            </div>
+            <div class="model-reading-card back-model-reading">
+              <div class="model-reading-name"><span class="model-reading-dot back-dot"></span><strong>Back sensor</strong></div>
+              <div class="model-axis-grid"><div><span>Pitch</span><strong id="modelBackPitch">+7.0°</strong></div><div><span>Roll</span><strong id="modelBackRoll">−1.2°</strong></div></div>
+            </div>
+            <div class="model-preview-controls" id="modelDemoControls">
+              <div class="model-controls-title"><div><strong>Try the movement</strong><p>Preview controls, not sensor input.</p></div><button class="model-reset-button" id="modelResetBtn" type="button">Reset</button></div>
+              <label class="orientation-control" for="demoBackPitch"><span>Back · forward / backward</span><output id="demoBackPitchValue">0°</output></label>
+              <input id="demoBackPitch" class="orientation-slider back-slider" type="range" min="-30" max="30" step="1" value="0">
+              <label class="orientation-control" for="demoBackRoll"><span>Back · sideways lean</span><output id="demoBackRollValue">0°</output></label>
+              <input id="demoBackRoll" class="orientation-slider back-slider" type="range" min="-25" max="25" step="1" value="0">
+              <label class="orientation-control" for="demoNeckPitch"><span>Neck · forward / backward</span><output id="demoNeckPitchValue">0°</output></label>
+              <input id="demoNeckPitch" class="orientation-slider neck-slider" type="range" min="-35" max="35" step="1" value="0">
+              <label class="orientation-control" for="demoNeckRoll"><span>Neck · sideways tilt</span><output id="demoNeckRollValue">0°</output></label>
+              <input id="demoNeckRoll" class="orientation-slider neck-slider" type="range" min="-25" max="25" step="1" value="0">
+            </div>
+            <div class="model-note" id="modelDataNote"><span class="model-note-icon">i</span><p>Connect the ESP32 to replace this demo movement with the two sensors’ live pitch and roll.</p></div>
+          </aside>
+        </div>
+        <div class="model-footer"><span><i class="footer-live-dot"></i> Separate joints: torso and neck</span><span>Point cloud generated from CC0 model geometry · <a href="https://github.com/UMRAM-Bilkent/supine-human-model" target="_blank" rel="noopener noreferrer">Model source ↗</a></span></div>
       </section>
 
       <footer class="page-footer"><span><span class="footer-pulse"></span> SpineAlign Lite <span class="footer-version">· Prototype dashboard</span></span><span>Measurements are relative to the calibrated reference. <a href="https://github.com/AdityaB411/SpineAlign" target="_blank" rel="noopener noreferrer">View project on GitHub ↗</a></span></footer>

@@ -7,6 +7,7 @@ on:
       - "index.html"
       - "styles.css"
       - "app.js"
+      - "orientation3d.js"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -35,7 +36,7 @@ jobs:
       - name: Prepare dashboard files
         run: |
           mkdir -p dist
-          cp index.html styles.css app.js dist/
+          cp index.html styles.css app.js orientation3d.js dist/
 
       - name: Upload dashboard artifact
         uses: actions/upload-pages-artifact@v3

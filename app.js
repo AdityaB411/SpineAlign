@@ -17,12 +17,20 @@
     statusDescription: $('statusDescription'), statusFootIcon: $('statusFootIcon'), statusFootText: $('statusFootText'),
     neckDeviceIndicator: $('neckDeviceIndicator'), backDeviceIndicator: $('backDeviceIndicator'), neckDeviceStatus: $('neckDeviceStatus'),
     backDeviceStatus: $('backDeviceStatus'), neckDetailAngle: $('neckDetailAngle'), backDetailAngle: $('backDetailAngle'),
-    neckMeter: $('neckMeter'), backMeter: $('backMeter'), chartModeText: $('chartModeText'), chartEmpty: $('chartEmpty'), toast: $('toast')
+    neckMeter: $('neckMeter'), backMeter: $('backMeter'), chartModeText: $('chartModeText'), chartEmpty: $('chartEmpty'), toast: $('toast'),
+    batteryCard: $('battery'), batteryPercent: $('batteryPercent'), batteryVoltage: $('batteryVoltage'), batteryState: $('chargerState'),
+    batteryStatusPill: $('batteryStatusPill'), batteryProgress: $('batteryProgress'), batteryProgressTrack: $('batteryProgressTrack'),
+    batteryGlyphFill: $('batteryGlyphFill'), batteryHint: $('batteryHint'), batteryMonitorState: $('batteryMonitorState'), chargerSignalState: $('chargerSignalState'), batteryLevelCaption: $('batteryLevelCaption'),
+    batteryCard: $('battery'), batteryPercent: $('batteryPercent'), batteryVoltage: $('batteryVoltage'), batteryState: $('chargerState'),
+    batteryStatusPill: $('batteryStatusPill'), batteryProgress: $('batteryProgress'), batteryProgressTrack: $('batteryProgressTrack'),
+    batteryGlyphFill: $('batteryGlyphFill'), batteryHint: $('batteryHint'), batteryMonitorState: $('batteryMonitorState'), chargerSignalState: $('chargerSignalState'), batteryLevelCaption: $('batteryLevelCaption')
   };
 
   const state = {
     mode: 'demo', connected: false, port: null, reader: null, readTask: null, writer: null, keepReading: false,
-    neck: 5.2, back: 8.7, firmwareAlert: false, hasLiveReading: false, simulationSlouch: false,
+    neck: 5.2, back: 8.7, neckPitch: 4.0, neckRoll: 0.8, backPitch: 7.0, backRoll: -1.2,
+    batteryVoltage: 3.87, batteryPercent: 78, batteryCharging: false, batteryFull: false, batteryAvailable: false,
+    calibrationKnown: false, isCalibrated: false, firmwareAlert: false, hasLiveReading: false, simulationSlouch: false,
     sampleCounter: 0, lastHistoryAt: 0, history: [], toastTimer: null, animationTimer: null, lastDataAt: Date.now()
   };
 
@@ -80,6 +88,34 @@
     els.statusFootIcon.textContent = overallBad ? '!' : '✓';
     els.statusFootText.textContent = overallBad ? `Maximum deviation: ${worst.toFixed(1)}°` : 'You are in your target range';
     els.statusFootText.parentElement.style.color = overallBad ? '#d86a5f' : '#5a9c8d';
+    updateModelOrientation();
+  }
+
+  function updateModelOrientation() {
+    if (window.SpineAlign3D && typeof window.SpineAlign3D.updateTelemetry === 'function') window.SpineAlign3D.updateTelemetry({ neckPitch: state.neckPitch, neckRoll: state.neckRoll, backPitch: state.backPitch, backRoll: state.backRoll, mode: state.mode });
+  }
+
+  function renderBattery() {
+    if (!els.batteryPercent) return;
+    const live = state.mode === 'live';
+    const unknown = live && !state.batteryAvailable;
+    const percent = state.batteryPercent, voltage = state.batteryVoltage;
+    const charging = live && !unknown && state.batteryCharging, full = live && !unknown && state.batteryFull;
+    els.batteryCard?.classList.toggle('is-charging', charging); els.batteryCard?.classList.toggle('is-low', !unknown && percent <= 20);
+    els.batteryPercent.textContent = unknown ? '—' : `${Math.round(percent)}%`;
+    els.batteryVoltage.textContent = unknown ? 'Not reported' : `${voltage.toFixed(2)} V`;
+    els.batteryLevelCaption.textContent = unknown ? 'No battery telemetry' : live ? 'Estimated charge' : 'Demo estimate';
+    els.batteryProgress.style.width = unknown ? '0%' : `${Math.max(0, Math.min(100, percent))}%`;
+    els.batteryProgress.classList.toggle('is-charging', charging); els.batteryProgress.classList.toggle('low', !unknown && percent <= 20); els.batteryProgress.classList.toggle('unknown', unknown); els.batteryProgress.classList.toggle('is-demo', !live);
+    els.batteryProgressTrack.setAttribute('aria-valuenow', unknown ? '0' : String(Math.round(percent)));
+    els.batteryProgressTrack.setAttribute('aria-valuetext', unknown ? 'Battery telemetry unavailable' : `${Math.round(percent)} percent estimated charge`);
+    els.batteryGlyphFill.style.width = unknown ? '0%' : `${Math.max(0, Math.min(100, percent))}%`; els.batteryGlyphFill.classList.toggle('charging', charging); els.batteryGlyphFill.classList.toggle('low', !unknown && percent <= 20);
+    els.batteryStatusPill.className = `battery-status-pill ${unknown ? 'unknown' : charging ? 'charging' : full ? 'full' : !live ? 'demo' : percent <= 20 ? 'low' : ''}`;
+    els.batteryStatusPill.textContent = unknown ? 'Telemetry unavailable' : charging ? 'Charging' : full ? 'Charged / near full' : !live ? 'Demo preview' : percent <= 20 ? 'Low battery' : 'Not charging';
+    els.batteryState.textContent = unknown ? 'Not reported by device' : charging ? 'Charging in progress' : full ? 'Near-full voltage estimate' : !live ? 'Demo · Not charging' : 'Not charging';
+    els.batteryMonitorState.textContent = unknown ? 'Not enabled / not wired' : live ? 'Live telemetry' : 'Demo values';
+    els.chargerSignalState.textContent = unknown ? 'No charger signal' : charging ? 'TP4056 CHRG active' : full ? 'Voltage suggests near full' : !live ? 'Preview only' : 'No active charge signal';
+    els.batteryHint.textContent = unknown ? 'The connected firmware is not reporting battery data. Enable the hardware battery monitor and wire the divider / TP4056 status output.' : charging ? 'Charging is detected from the TP4056 active-low CHRG status output.' : full ? 'Voltage is near the full-charge range; this alone cannot prove a charger is connected.' : !live ? 'Demo values preview the battery UI and are not real battery measurements.' : 'Battery percentage is estimated from measured voltage and should be calibrated for the actual cell.';
   }
 
   function addHistorySample(force = false) {
@@ -152,6 +188,8 @@
   function setMode(mode) {
     state.mode = mode;
     const live = mode === 'live';
+    if (window.SpineAlign3D && typeof window.SpineAlign3D.setMode === 'function') window.SpineAlign3D.setMode(mode);
+    renderBattery();
     els.topConnectionText.textContent = live ? 'USB connected' : 'Demo mode';
     els.connectionPill.classList.toggle('is-live', live);
     els.sideDot.classList.toggle('is-live', live);
@@ -160,7 +198,7 @@
     els.deviceConnectBtn.textContent = live ? 'Disconnect device' : 'Connect ESP32';
     els.deviceStatusTitle.textContent = live ? (state.hasLiveReading ? 'ESP32 connected' : 'Waiting for sensor data') : 'Running in demo mode';
     els.deviceStatusSubtitle.textContent = live
-      ? 'Listening for neck and back angles over USB serial.'
+      ? 'Listening for neck/back pitch, roll, posture and battery telemetry over USB serial.'
       : 'Example values are shown so you can explore the dashboard.';
     els.connectionType.textContent = live ? 'USB serial · 115200 baud' : 'Demo mode';
     els.chartModeText.textContent = live ? 'Live sensor readings' : 'Demo readings';
@@ -174,31 +212,34 @@
     const demoButton = $('simulateSlouchBtn');
     if (demoButton) demoButton.hidden = live;
     els.deviceNote.textContent = live
-      ? 'Calibration sends CALIBRATE to the firmware. Angle values are relative to that reference.'
+      ? 'Calibration sends CALIBRATE to the firmware. Orientation depends on sensor mounting; battery fields appear only when the hardware monitor is enabled.'
       : 'For live data, connect your ESP32 over USB in a desktop Chromium browser.';
   }
 
   function updateFromLine(line) {
-    // Firmware telemetry format: N:5.2,B:8.7,ALERT:0
-    const neck = line.match(/(?:^|[,\s])N\s*:\s*(-?\d+(?:\.\d+)?)/i);
-    const back = line.match(/(?:^|[,\s])B\s*:\s*(-?\d+(?:\.\d+)?)/i);
-    const alert = line.match(/(?:^|[,\s])ALERT\s*:\s*([01])/i);
-    if (!neck || !back) return;
-    const n = Number(neck[1]);
-    const b = Number(back[1]);
-    if (!Number.isFinite(n) || !Number.isFinite(b)) return;
-    state.neck = n;
-    state.back = b;
-    if (alert) state.firmwareAlert = alert[1] === '1';
-    state.hasLiveReading = true;
-    state.lastDataAt = Date.now();
-    if (els.deviceStatusTitle) els.deviceStatusTitle.textContent = 'ESP32 connected';
-    els.neckDeviceStatus.textContent = 'Reading';
-    els.backDeviceStatus.textContent = 'Reading';
-    els.neckDeviceIndicator.className = 'tiny-indicator good';
-    els.backDeviceIndicator.className = 'tiny-indicator good';
-    renderReadings();
-    addHistorySample();
+    // N/B remain scalar overall tilt; NP/NR/BP/BR are sensor pitch/roll.
+    const readField = (key) => {
+      const match = line.match(new RegExp('(?:^|[,\\s])' + key + '\\s*:\\s*(-?\\d+(?:\\.\\d+)?)', 'i'));
+      return match ? Number(match[1]) : null;
+    };
+    const neck = readField('N'), back = readField('B');
+    if (neck === null || back === null || !Number.isFinite(neck) || !Number.isFinite(back)) return;
+    state.neck = neck; state.back = back;
+    state.neckPitch = readField('NP') ?? neck; state.neckRoll = readField('NR') ?? 0;
+    state.backPitch = readField('BP') ?? back; state.backRoll = readField('BR') ?? 0;
+    const alert = readField('ALERT'); if (alert !== null) state.firmwareAlert = alert === 1;
+    const cal = readField('CAL'); if (cal !== null) { state.calibrationKnown = true; state.isCalibrated = cal === 1; }
+    const voltage = readField('BAT'), percent = readField('PCT'), charging = readField('CHG'), full = readField('FULL');
+    state.batteryAvailable = voltage !== null && percent !== null && voltage > 0 && percent >= 0;
+    if (state.batteryAvailable) {
+      state.batteryVoltage = voltage; state.batteryPercent = Math.max(0, Math.min(100, percent));
+      state.batteryCharging = charging === 1; state.batteryFull = full === 1;
+    }
+    state.hasLiveReading = true; state.lastDataAt = Date.now();
+    if (els.deviceStatusTitle) els.deviceStatusTitle.textContent = state.calibrationKnown && !state.isCalibrated ? 'ESP32 connected · calibrate sensors' : 'ESP32 connected';
+    els.neckDeviceStatus.textContent = 'Reading'; els.backDeviceStatus.textContent = 'Reading';
+    els.neckDeviceIndicator.className = 'tiny-indicator good'; els.backDeviceIndicator.className = 'tiny-indicator good';
+    renderReadings(); renderBattery(); addHistorySample();
   }
 
   async function connectSerial() {
@@ -277,6 +318,10 @@
     state.keepReading = false;
     state.connected = false;
     state.simulationSlouch = false;
+    state.batteryVoltage = 3.87; state.batteryPercent = 78; state.batteryAvailable = false; state.batteryCharging = false; state.batteryFull = false;
+    state.neckPitch = 4; state.neckRoll = 0.8; state.backPitch = 7; state.backRoll = -1.2;
+    state.batteryVoltage = 3.87; state.batteryPercent = 78; state.batteryAvailable = false; state.batteryCharging = false; state.batteryFull = false;
+    state.neckPitch = 4; state.neckRoll = 0.8; state.backPitch = 7; state.backRoll = -1.2;
     const slouchButton = $('simulateSlouchBtn');
     if (slouchButton) slouchButton.textContent = 'Simulate slouch';
     const port = state.port;
@@ -309,6 +354,7 @@
     state.simulationSlouch = false;
     state.neck = 0;
     state.back = 0;
+    state.neckPitch = state.neckRoll = state.backPitch = state.backRoll = 0;
     state.history = [];
     renderReadings();
     addHistorySample(true);
@@ -326,6 +372,8 @@
       state.neck = 5.2 + Math.sin(t / 6) * 2.2 + Math.sin(t / 15) * .8;
       state.back = 8.7 + Math.sin(t / 8 + .8) * 2.7 + Math.sin(t / 14) * .7;
     }
+    state.neckPitch = state.neck; state.neckRoll = Math.sin(t / 5) * (state.simulationSlouch ? 5 : 1.8);
+    state.backPitch = state.back; state.backRoll = Math.cos(t / 6) * (state.simulationSlouch ? 4 : 2.4);
     renderReadings();
     addHistorySample();
   }
@@ -337,8 +385,8 @@
     }
     state.simulationSlouch = !state.simulationSlouch;
     if (!state.simulationSlouch) {
-      state.neck = 6.1;
-      state.back = 8.2;
+      state.neck = 6.1; state.back = 8.2;
+      state.neckPitch = 5.4; state.neckRoll = 1.8; state.backPitch = 7.6; state.backRoll = -2.0;
     }
     renderReadings();
     addHistorySample(true);
@@ -369,6 +417,7 @@
   window.addEventListener('resize', renderChart);
 
   setMode('demo');
+  renderBattery();
   renderReadings();
   for (let i = 0; i < 12; i++) {
     const n = state.neck + Math.sin(i / 2) * 1.3;

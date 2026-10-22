@@ -56,7 +56,7 @@
     label.textContent = outOfRange ? 'Above threshold' : 'In range';
     label.classList.toggle('bad', outOfRange);
     fill.style.width = deviationFill(value);
-    dot.style.background = outOfRange ? '#e8796d' : '#20b8a0';
+    dot.style.background = outOfRange ? '#c77f72' : '#789d80';
     return outOfRange;
   }
 
@@ -72,8 +72,8 @@
     els.backDetailAngle.textContent = `${angleString(state.back)}°`;
     els.neckMeter.style.width = deviationFill(state.neck);
     els.backMeter.style.width = deviationFill(state.back);
-    els.neckMeter.style.background = neckBad ? '#e8796d' : '#7b87ec';
-    els.backMeter.style.background = backBad ? '#e8796d' : '#38beae';
+    els.neckMeter.style.background = neckBad ? '#c77f72' : '#c28f68';
+    els.backMeter.style.background = backBad ? '#c77f72' : '#789d80';
 
     els.statusIcon.classList.toggle('bad', overallBad);
     els.statusIcon.classList.toggle('good', !overallBad);
@@ -87,7 +87,7 @@
       : 'Both sensors are below the 15° alert threshold.';
     els.statusFootIcon.textContent = overallBad ? '!' : '✓';
     els.statusFootText.textContent = overallBad ? `Maximum deviation: ${worst.toFixed(1)}°` : 'You are in your target range';
-    els.statusFootText.parentElement.style.color = overallBad ? '#d86a5f' : '#5a9c8d';
+    els.statusFootText.parentElement.style.color = overallBad ? '#b95f51' : '#587c5d';
     updateModelOrientation();
   }
 
@@ -154,18 +154,18 @@
     [0, 10, 20, 30].forEach((tick) => {
       const y = pad.top + plotH - (tick / CHART_MAX_ANGLE) * plotH;
       ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(width - pad.right, y);
-      ctx.strokeStyle = '#eef1f7'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = '#a2a9ba'; ctx.textAlign = 'right'; ctx.fillText(String(tick), pad.left - 8, y);
+      ctx.strokeStyle = '#e3e8de'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = '#7f8a80'; ctx.textAlign = 'right'; ctx.fillText(String(tick), pad.left - 8, y);
     });
 
     const thresholdY = pad.top + plotH - (ALERT_THRESHOLD / CHART_MAX_ANGLE) * plotH;
     ctx.save(); ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(pad.left, thresholdY); ctx.lineTo(width - pad.right, thresholdY);
-    ctx.strokeStyle = '#efbb78'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.restore();
-    ctx.fillStyle = '#c99a58'; ctx.textAlign = 'right'; ctx.fillText('15°', width - pad.right, thresholdY - 8);
+    ctx.strokeStyle = '#c59a66'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.restore();
+    ctx.fillStyle = '#a98250'; ctx.textAlign = 'right'; ctx.fillText('15°', width - pad.right, thresholdY - 8);
 
     const lines = [
-      { key: 'neck', color: '#7986ed', fill: 'rgba(121,134,237,.08)' },
-      { key: 'back', color: '#31bdad', fill: 'rgba(49,189,173,.07)' }
+      { key: 'neck', color: '#c28f68', fill: 'rgba(194,143,104,.10)' },
+      { key: 'back', color: '#789d80', fill: 'rgba(120,157,128,.10)' }
     ];
     lines.forEach((line) => {
       const points = state.history.map((sample, index) => ({
@@ -180,7 +180,7 @@
       ctx.beginPath(); ctx.arc(final.x, final.y, 6, 0, Math.PI * 2); ctx.strokeStyle = line.fill; ctx.lineWidth = 3; ctx.stroke();
     });
 
-    ctx.fillStyle = '#a2a9ba'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#7f8a80'; ctx.textAlign = 'left';
     ctx.fillText('Earlier', pad.left, height - 9);
     ctx.textAlign = 'right'; ctx.fillText('Now', width - pad.right, height - 9);
   }
@@ -206,8 +206,8 @@
     els.backDeviceStatus.textContent = live ? (state.hasLiveReading ? 'Reading' : 'Waiting') : 'Simulated';
     els.neckDeviceIndicator.className = `tiny-indicator${live && state.hasLiveReading ? ' good' : ''}`;
     els.backDeviceIndicator.className = `tiny-indicator${live && state.hasLiveReading ? ' good' : ''}`;
-    els.neckDot.style.background = live && !state.hasLiveReading ? '#e9b66f' : '#20b8a0';
-    els.backDot.style.background = live && !state.hasLiveReading ? '#e9b66f' : '#20b8a0';
+    els.neckDot.style.background = live && !state.hasLiveReading ? '#c59a66' : '#789d80';
+    els.backDot.style.background = live && !state.hasLiveReading ? '#c59a66' : '#789d80';
     els.calibrateBtn.disabled = live && !state.hasLiveReading;
     const demoButton = $('simulateSlouchBtn');
     if (demoButton) demoButton.hidden = live;

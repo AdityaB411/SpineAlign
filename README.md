@@ -76,3 +76,15 @@ Complete the Android app and Bluetooth Classic SPP link; integrate and validate 
 ## Original Wokwi project
 
 https://wokwi.com/projects/474687638434666497
+
+## Web dashboard
+
+A simple responsive posture dashboard is included in `index.html`, `styles.css`, and `app.js`. It shows the current neck and back angle deviations, a good/needs-attention status, a recent angle-history chart, connection state, and a preview of the planned two-sensor 3D view.
+
+- [Open dashboard source](index.html)
+- [Dashboard setup and serial protocol](docs/Dashboard_Setup.md)
+- [GitHub Pages deployment workflow](.github/workflows/pages.yml)
+
+The dashboard starts in demo mode. For live readings, it connects to the current ESP32 firmware over USB serial at 115200 baud and reads lines such as `N:5.2,B:8.7,ALERT:0`. The `CALIBRATE` command can be sent from the dashboard. Live USB serial requires a desktop Chromium browser on HTTPS or localhost.
+
+The 3D model and Bluetooth/Android integration are future work; the current browser dashboard does not claim those features are implemented.

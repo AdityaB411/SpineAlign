@@ -20,9 +20,6 @@
     neckMeter: $('neckMeter'), backMeter: $('backMeter'), chartModeText: $('chartModeText'), chartEmpty: $('chartEmpty'), toast: $('toast'),
     batteryCard: $('battery'), batteryPercent: $('batteryPercent'), batteryVoltage: $('batteryVoltage'), batteryState: $('chargerState'),
     batteryStatusPill: $('batteryStatusPill'), batteryProgress: $('batteryProgress'), batteryProgressTrack: $('batteryProgressTrack'),
-    batteryGlyphFill: $('batteryGlyphFill'), batteryHint: $('batteryHint'), batteryMonitorState: $('batteryMonitorState'), chargerSignalState: $('chargerSignalState'), batteryLevelCaption: $('batteryLevelCaption'),
-    batteryCard: $('battery'), batteryPercent: $('batteryPercent'), batteryVoltage: $('batteryVoltage'), batteryState: $('chargerState'),
-    batteryStatusPill: $('batteryStatusPill'), batteryProgress: $('batteryProgress'), batteryProgressTrack: $('batteryProgressTrack'),
     batteryGlyphFill: $('batteryGlyphFill'), batteryHint: $('batteryHint'), batteryMonitorState: $('batteryMonitorState'), chargerSignalState: $('chargerSignalState'), batteryLevelCaption: $('batteryLevelCaption')
   };
 
@@ -30,8 +27,10 @@
     mode: 'demo', connected: false, port: null, reader: null, readTask: null, writer: null, keepReading: false,
     neck: 5.2, back: 8.7, neckPitch: 4.0, neckRoll: 0.8, backPitch: 7.0, backRoll: -1.2,
     batteryVoltage: 3.87, batteryPercent: 78, batteryCharging: false, batteryFull: false, batteryAvailable: false,
-    calibrationKnown: false, isCalibrated: false, firmwareAlert: false, hasLiveReading: false, simulationSlouch: false,
-    sampleCounter: 0, lastHistoryAt: 0, history: [], toastTimer: null, animationTimer: null, lastDataAt: Date.now()
+    calibrationKnown: false, isCalibrated: false, firmwareAlert: false, firmwareAlertKnown: false,
+    neckSensorOk: true, backSensorOk: true, linkStale: false, chargerStatusAvailable: false,
+    hasLiveReading: false, simulationSlouch: false, sampleCounter: 0, lastHistoryAt: 0,
+    history: [], toastTimer: null, animationTimer: null, freshnessTimer: null, lastDataAt: Date.now()
   };
 
   function angleString(value) {
@@ -63,7 +62,12 @@
   function renderReadings() {
     const neckBad = setRangeStyle(els.neckRangeLabel, els.neckFill, state.neck, els.neckDot);
     const backBad = setRangeStyle(els.backRangeLabel, els.backFill, state.back, els.backDot);
-    const overallBad = neckBad || backBad;
+    const live = state.mode === 'live';
+    const stale = live && state.linkStale;
+    const waiting = live && !state.hasLiveReading && !stale;
+    const sensorFault = live && state.hasLiveReading && (!state.neckSensorOk || !state.backSensorOk);
+    const uncalibrated = live && state.hasLiveReading && state.calibrationKnown && !state.isCalibrated && !sensorFault && !stale;
+    const overallBad = live && state.firmwareAlertKnown ? state.firmwareAlert : (neckBad || backBad);
     const worst = Math.max(Math.abs(state.neck), Math.abs(state.back));
 
     els.neckAngle.textContent = angleString(state.neck);
@@ -75,19 +79,56 @@
     els.neckMeter.style.background = neckBad ? '#c77f72' : '#c28f68';
     els.backMeter.style.background = backBad ? '#c77f72' : '#789d80';
 
-    els.statusIcon.classList.toggle('bad', overallBad);
-    els.statusIcon.classList.toggle('good', !overallBad);
-    els.statusIcon.textContent = overallBad ? '!' : '✓';
-    els.statusBadge.classList.toggle('bad', overallBad);
-    els.statusBadge.classList.toggle('good', !overallBad);
-    els.statusBadge.textContent = overallBad ? 'Needs attention' : 'Within range';
-    els.statusTitle.textContent = overallBad ? 'Posture needs attention' : 'Looking good';
-    els.statusDescription.textContent = overallBad
-      ? `Your ${neckBad && backBad ? 'neck and back angles are' : neckBad ? 'neck angle is' : 'back angle is'} at or above ${ALERT_THRESHOLD}°. Try returning to your calibrated position.`
-      : 'Both sensors are below the 15° alert threshold.';
-    els.statusFootIcon.textContent = overallBad ? '!' : '✓';
-    els.statusFootText.textContent = overallBad ? `Maximum deviation: ${worst.toFixed(1)}°` : 'You are in your target range';
-    els.statusFootText.parentElement.style.color = overallBad ? '#b95f51' : '#587c5d';
+    if (stale) {
+      els.neckRangeLabel.textContent = 'No fresh data';
+      els.backRangeLabel.textContent = 'No fresh data';
+      els.neckRangeLabel.classList.remove('bad');
+      els.backRangeLabel.classList.remove('bad');
+    } else if (sensorFault) {
+      if (!state.neckSensorOk) { els.neckRangeLabel.textContent = 'Sensor offline'; els.neckRangeLabel.classList.add('bad'); }
+      if (!state.backSensorOk) { els.backRangeLabel.textContent = 'Sensor offline'; els.backRangeLabel.classList.add('bad'); }
+    }
+
+    els.statusIcon.classList.toggle('bad', overallBad || sensorFault || stale);
+    els.statusIcon.classList.toggle('good', !overallBad && !sensorFault && !stale);
+    els.statusIcon.textContent = overallBad || sensorFault || stale ? '!' : '✓';
+    els.statusBadge.classList.toggle('bad', overallBad || sensorFault || stale);
+    els.statusBadge.classList.toggle('good', !overallBad && !sensorFault && !stale);
+
+    if (waiting) {
+      els.statusTitle.textContent = 'Waiting for sensor data';
+      els.statusBadge.textContent = 'Connecting';
+      els.statusDescription.textContent = 'USB is connected. Waiting for a valid reading from the firmware.';
+      els.statusFootIcon.textContent = '…';
+      els.statusFootText.textContent = 'No live sample received yet';
+    } else if (stale) {
+      els.statusTitle.textContent = 'Live data has stopped';
+      els.statusBadge.textContent = 'Stale data';
+      els.statusDescription.textContent = 'No valid telemetry has arrived recently. Check the USB cable, serial monitor, and firmware.';
+      els.statusFootIcon.textContent = '!';
+      els.statusFootText.textContent = 'Displayed angles may be old';
+    } else if (sensorFault) {
+      els.statusTitle.textContent = 'Sensor unavailable';
+      els.statusBadge.textContent = 'Check hardware';
+      els.statusDescription.textContent = `${!state.neckSensorOk && !state.backSensorOk ? 'Both sensors are' : !state.neckSensorOk ? 'The neck sensor is' : 'The back sensor is'} not responding. Affected angle values may be from an earlier sample.`;
+      els.statusFootIcon.textContent = '!';
+      els.statusFootText.textContent = 'Posture monitoring is paused';
+    } else if (uncalibrated) {
+      els.statusTitle.textContent = 'Calibration needed';
+      els.statusBadge.textContent = 'Not calibrated';
+      els.statusDescription.textContent = 'Hold a comfortable upright reference posture and calibrate before monitoring deviations.';
+      els.statusFootIcon.textContent = 'i';
+      els.statusFootText.textContent = 'Readings are not yet relative to your reference';
+    } else {
+      els.statusTitle.textContent = overallBad ? 'Posture needs attention' : 'Looking good';
+      els.statusBadge.textContent = overallBad ? 'Needs attention' : 'Within range';
+      els.statusDescription.textContent = overallBad
+        ? `Your ${neckBad && backBad ? 'neck and back angles are' : neckBad ? 'neck angle is' : 'back angle is'} outside the configured range. Return toward your calibrated position.`
+        : 'Both sensors are below the configured posture threshold.';
+      els.statusFootIcon.textContent = overallBad ? '!' : '✓';
+      els.statusFootText.textContent = overallBad ? `Maximum deviation: ${worst.toFixed(1)}°` : 'You are in your target range';
+    }
+    els.statusFootText.parentElement.style.color = (overallBad || sensorFault || stale) ? '#b95f51' : uncalibrated || waiting ? '#9b7947' : '#587c5d';
     updateModelOrientation();
   }
 
@@ -99,23 +140,41 @@
     if (!els.batteryPercent) return;
     const live = state.mode === 'live';
     const unknown = live && !state.batteryAvailable;
+    const chargerUnknown = live && !unknown && !state.chargerStatusAvailable;
     const percent = state.batteryPercent, voltage = state.batteryVoltage;
-    const charging = live && !unknown && state.batteryCharging, full = live && !unknown && state.batteryFull;
-    els.batteryCard?.classList.toggle('is-charging', charging); els.batteryCard?.classList.toggle('is-low', !unknown && percent <= 20);
+    const charging = live && !unknown && !chargerUnknown && state.batteryCharging;
+    const full = live && !unknown && !chargerUnknown && state.batteryFull;
+    els.batteryCard?.classList.toggle('is-charging', charging);
+    els.batteryCard?.classList.toggle('is-low', !unknown && percent <= 20);
     els.batteryPercent.textContent = unknown ? '—' : `${Math.round(percent)}%`;
     els.batteryVoltage.textContent = unknown ? 'Not reported' : `${voltage.toFixed(2)} V`;
     els.batteryLevelCaption.textContent = unknown ? 'No battery telemetry' : live ? 'Estimated charge' : 'Demo estimate';
     els.batteryProgress.style.width = unknown ? '0%' : `${Math.max(0, Math.min(100, percent))}%`;
-    els.batteryProgress.classList.toggle('is-charging', charging); els.batteryProgress.classList.toggle('low', !unknown && percent <= 20); els.batteryProgress.classList.toggle('unknown', unknown); els.batteryProgress.classList.toggle('is-demo', !live);
+    els.batteryProgress.classList.toggle('is-charging', charging);
+    els.batteryProgress.classList.toggle('low', !unknown && percent <= 20);
+    els.batteryProgress.classList.toggle('unknown', unknown);
+    els.batteryProgress.classList.toggle('is-demo', !live);
     els.batteryProgressTrack.setAttribute('aria-valuenow', unknown ? '0' : String(Math.round(percent)));
     els.batteryProgressTrack.setAttribute('aria-valuetext', unknown ? 'Battery telemetry unavailable' : `${Math.round(percent)} percent estimated charge`);
-    els.batteryGlyphFill.style.width = unknown ? '0%' : `${Math.max(0, Math.min(100, percent))}%`; els.batteryGlyphFill.classList.toggle('charging', charging); els.batteryGlyphFill.classList.toggle('low', !unknown && percent <= 20);
+    els.batteryGlyphFill.style.width = unknown ? '0%' : `${Math.max(0, Math.min(100, percent))}%`;
+    els.batteryGlyphFill.classList.toggle('charging', charging);
+    els.batteryGlyphFill.classList.toggle('low', !unknown && percent <= 20);
     els.batteryStatusPill.className = `battery-status-pill ${unknown ? 'unknown' : charging ? 'charging' : full ? 'full' : !live ? 'demo' : percent <= 20 ? 'low' : ''}`;
-    els.batteryStatusPill.textContent = unknown ? 'Telemetry unavailable' : charging ? 'Charging' : full ? 'Charged / near full' : !live ? 'Demo preview' : percent <= 20 ? 'Low battery' : 'Not charging';
-    els.batteryState.textContent = unknown ? 'Not reported by device' : charging ? 'Charging in progress' : full ? 'Near-full voltage estimate' : !live ? 'Demo · Not charging' : 'Not charging';
+    els.batteryStatusPill.textContent = unknown ? 'Telemetry unavailable' : charging ? 'Charging' : full ? 'Near full (estimate)' : !live ? 'Demo preview' : chargerUnknown ? 'Charger status unknown' : percent <= 20 ? 'Low battery' : 'Not charging';
+    els.batteryState.textContent = unknown ? 'Not reported by device' : charging ? 'Charging in progress' : full ? 'Near-full voltage estimate' : !live ? 'Demo · Not charging' : chargerUnknown ? 'Status not reported' : 'Not charging';
     els.batteryMonitorState.textContent = unknown ? 'Not enabled / not wired' : live ? 'Live telemetry' : 'Demo values';
-    els.chargerSignalState.textContent = unknown ? 'No charger signal' : charging ? 'TP4056 CHRG active' : full ? 'Voltage suggests near full' : !live ? 'Preview only' : 'No active charge signal';
-    els.batteryHint.textContent = unknown ? 'The connected firmware is not reporting battery data. Enable the hardware battery monitor and wire the divider / TP4056 status output.' : charging ? 'Charging is detected from the TP4056 active-low CHRG status output.' : full ? 'Voltage is near the full-charge range; this alone cannot prove a charger is connected.' : !live ? 'Demo values preview the battery UI and are not real battery measurements.' : 'Battery percentage is estimated from measured voltage and should be calibrated for the actual cell.';
+    els.chargerSignalState.textContent = unknown ? 'No battery signal' : charging ? 'TP4056 CHRG active' : full ? 'Voltage suggests near full' : !live ? 'Preview only' : chargerUnknown ? 'No reliable charger state' : 'No active charge signal';
+    els.batteryHint.textContent = unknown
+      ? 'The connected firmware is not reporting battery data. Enable the hardware battery monitor and wire the divider and charger status output.'
+      : charging
+        ? 'Charging is detected from the TP4056 active-low CHRG status output.'
+        : full
+          ? 'Voltage is near the full-charge range; this cannot confirm that a charger is connected or charging has completed.'
+          : chargerUnknown
+            ? 'Battery voltage is available, but the firmware did not report a valid charger state.'
+            : !live
+              ? 'Demo values preview the battery UI and are not real battery measurements.'
+              : 'Battery percentage is estimated from voltage and should be calibrated for the actual cell.';
   }
 
   function addHistorySample(force = false) {
@@ -214,6 +273,7 @@
     els.deviceNote.textContent = live
       ? 'Calibration sends CALIBRATE to the firmware. Orientation depends on sensor mounting; battery fields appear only when the hardware monitor is enabled.'
       : 'For live data, connect your ESP32 over USB in a desktop Chromium browser.';
+    renderReadings();
   }
 
   function updateFromLine(line) {
@@ -227,19 +287,51 @@
     state.neck = neck; state.back = back;
     state.neckPitch = readField('NP') ?? neck; state.neckRoll = readField('NR') ?? 0;
     state.backPitch = readField('BP') ?? back; state.backRoll = readField('BR') ?? 0;
-    const alert = readField('ALERT'); if (alert !== null) state.firmwareAlert = alert === 1;
-    const cal = readField('CAL'); if (cal !== null) { state.calibrationKnown = true; state.isCalibrated = cal === 1; }
+    const alert = readField('ALERT');
+    if (alert !== null) { state.firmwareAlert = alert === 1; state.firmwareAlertKnown = true; }
+    const cal = readField('CAL');
+    if (cal !== null) { state.calibrationKnown = true; state.isCalibrated = cal === 1; }
+    const neckOk = readField('NS'), backOk = readField('BS');
+    state.neckSensorOk = neckOk === null ? true : neckOk === 1;
+    state.backSensorOk = backOk === null ? true : backOk === 1;
     const voltage = readField('BAT'), percent = readField('PCT'), charging = readField('CHG'), full = readField('FULL');
     state.batteryAvailable = voltage !== null && percent !== null && voltage > 0 && percent >= 0;
+    state.chargerStatusAvailable = charging !== null && charging >= 0 && full !== null && full >= 0;
     if (state.batteryAvailable) {
-      state.batteryVoltage = voltage; state.batteryPercent = Math.max(0, Math.min(100, percent));
-      state.batteryCharging = charging === 1; state.batteryFull = full === 1;
+      state.batteryVoltage = voltage;
+      state.batteryPercent = Math.max(0, Math.min(100, percent));
+      state.batteryCharging = charging === 1;
+      state.batteryFull = full === 1;
     }
-    state.hasLiveReading = true; state.lastDataAt = Date.now();
+    state.hasLiveReading = true;
+    state.lastDataAt = Date.now();
+    state.linkStale = false;
+    els.topConnectionText.textContent = 'USB connected';
+    els.connectionPill.classList.add('is-live');
+    els.sideDot.classList.add('is-live');
+    els.sideConnectionText.textContent = 'ESP32 connected';
     if (els.deviceStatusTitle) els.deviceStatusTitle.textContent = state.calibrationKnown && !state.isCalibrated ? 'ESP32 connected · calibrate sensors' : 'ESP32 connected';
     els.neckDeviceStatus.textContent = 'Reading'; els.backDeviceStatus.textContent = 'Reading';
     els.neckDeviceIndicator.className = 'tiny-indicator good'; els.backDeviceIndicator.className = 'tiny-indicator good';
     renderReadings(); renderBattery(); addHistorySample();
+  }
+
+  function handleSerialLine(line) {
+    if (line === 'CALIBRATED') {
+      state.calibrationKnown = true;
+      state.isCalibrated = true;
+      showToast('Sensors calibrated successfully.');
+      renderReadings();
+      return;
+    }
+    if (line === 'CALIBRATION FAILED') {
+      state.calibrationKnown = true;
+      state.isCalibrated = false;
+      showToast('Calibration failed. Check both sensors and try again.', true);
+      renderReadings();
+      return;
+    }
+    updateFromLine(line);
   }
 
   async function connectSerial() {
@@ -261,6 +353,18 @@
       state.connected = true;
       state.keepReading = true;
       state.hasLiveReading = false;
+      state.linkStale = false;
+      state.lastDataAt = Date.now();
+      state.calibrationKnown = false;
+      state.isCalibrated = false;
+      state.firmwareAlertKnown = false;
+      state.neckSensorOk = false;
+      state.backSensorOk = false;
+      state.batteryAvailable = false;
+      state.chargerStatusAvailable = false;
+      state.history = [];
+      state.lastHistoryAt = 0;
+      renderChart();
       setMode('live');
       showToast('Connected. Waiting for the ESP32 angle stream…');
       state.readTask = readSerialLoop(port);
@@ -284,7 +388,7 @@
             buffer += value;
             const lines = buffer.split(/\r?\n/);
             buffer = lines.pop() || '';
-            for (const line of lines) updateFromLine(line.trim());
+            for (const line of lines) handleSerialLine(line.trim());
             if (buffer.length > 512) buffer = buffer.slice(-128);
           }
         } finally {
@@ -317,11 +421,28 @@
   async function disconnectSerial(showMessage = true) {
     state.keepReading = false;
     state.connected = false;
+    state.hasLiveReading = false;
+    state.linkStale = false;
+    state.calibrationKnown = false;
+    state.isCalibrated = false;
+    state.firmwareAlert = false;
+    state.firmwareAlertKnown = false;
+    state.neckSensorOk = true;
+    state.backSensorOk = true;
+    state.chargerStatusAvailable = false;
     state.simulationSlouch = false;
-    state.batteryVoltage = 3.87; state.batteryPercent = 78; state.batteryAvailable = false; state.batteryCharging = false; state.batteryFull = false;
-    state.neckPitch = 4; state.neckRoll = 0.8; state.backPitch = 7; state.backRoll = -1.2;
-    state.batteryVoltage = 3.87; state.batteryPercent = 78; state.batteryAvailable = false; state.batteryCharging = false; state.batteryFull = false;
-    state.neckPitch = 4; state.neckRoll = 0.8; state.backPitch = 7; state.backRoll = -1.2;
+    state.batteryVoltage = 3.87;
+    state.batteryPercent = 78;
+    state.batteryAvailable = false;
+    state.batteryCharging = false;
+    state.batteryFull = false;
+    state.neckPitch = 4;
+    state.neckRoll = 0.8;
+    state.backPitch = 7;
+    state.backRoll = -1.2;
+    state.history = [];
+    state.lastHistoryAt = 0;
+    renderChart();
     const slouchButton = $('simulateSlouchBtn');
     if (slouchButton) slouchButton.textContent = 'Simulate slouch';
     const port = state.port;
@@ -334,6 +455,20 @@
     }
     setMode('demo');
     if (showMessage) showToast('Device disconnected. Demo readings are back on.');
+  }
+
+  function checkLiveFreshness() {
+    if (state.mode !== 'live') return;
+    const stale = Date.now() - state.lastDataAt > 2500;
+    if (stale !== state.linkStale) {
+      state.linkStale = stale;
+      els.topConnectionText.textContent = stale ? 'No recent data' : 'USB connected';
+      els.connectionPill.classList.toggle('is-live', !stale);
+      els.sideDot.classList.toggle('is-live', !stale);
+      els.sideConnectionText.textContent = stale ? 'Telemetry stalled' : 'ESP32 connected';
+      els.deviceStatusTitle.textContent = stale ? 'No recent telemetry' : 'ESP32 connected';
+      renderReadings();
+    }
   }
 
   async function toggleConnection() {
@@ -407,6 +542,9 @@
       state.keepReading = false;
       if (state.reader) state.reader.cancel().catch(() => {});
       if (state.port) state.port.close().catch(() => {});
+      clearInterval(state.animationTimer);
+      clearInterval(state.freshnessTimer);
+      clearTimeout(state.toastTimer);
     });
   }
 
@@ -428,6 +566,7 @@
   // Add the demo-only slouch test without making the live UI pretend to be hardware.
   addSimulationControl();
   state.animationTimer = setInterval(updateDemo, 1000);
+  state.freshnessTimer = setInterval(checkLiveFreshness, 500);
   if ('serial' in navigator) {
     navigator.serial.addEventListener('disconnect', (event) => {
       if (state.port && event.target === state.port) disconnectSerial();

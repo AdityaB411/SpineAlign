@@ -1,16 +1,32 @@
-# SpineAlign Lite — Code Review Notes
+# SpineAlign Lite — Code Review and Fix Log
 
-## Changes applied before the initial project commit
+## Automated checks
 
-1. **Sustained-deviation timer:** the first alert requires the maximum absolute neck/back deviation to remain at or above 15° for the full 3-second hold. A dip below 15° before the first alert cancels the hold, matching the stated state-machine behavior.
-2. **Sensor-read failure handling:** posture decisions pause if either MPU6050 read fails. The posture state and reminder timer are cleared, and the LED turns off, so stale angles do not continue driving alerts.
-3. **Recovery behavior:** after the first alert, the 12° recovery threshold is used. Any unfinished LED pattern is canceled as soon as posture recovers.
-4. **Wokwi local configuration:** added `wokwi.toml` and documented an Arduino CLI build path. A GitHub Actions workflow compiles the sketch on pushes and pull requests.
-5. **Documentation consistency:** the literature survey and presentation content now consistently say ten prior systems were reviewed; nine design gaps remain identified.
+- GitHub Actions compiles the Wokwi/ESP32 DevKit profile and the physical AI-Thinker ESP32-CAM profile.
+- JavaScript syntax checks run for `app.js` and the ES module `orientation3d.js`.
+- These builds do not replace physical sensor, battery, charging, boot, or haptic-output validation.
 
-## Remaining verification
+## Issues fixed in this revision
 
-- Confirm the GitHub Actions firmware-build workflow passes on the target ESP32 Arduino core version.
-- Run the Wokwi simulation after importing the repository, including calibration, short posture excursions, sustained deviation, recovery, and sensor-read failure.
-- Validate sensor axis orientation and thresholds on physical hardware before relying on real-world angle values.
-- The Android app/Bluetooth link, physical haptic driver, battery/charging hardware, and physical-device validation remain outside the implementation scope of this simulation repository.
+1. **Battery pin mismatch:** firmware and documentation agree on GPIO34 for the battery divider (ADC1) and GPIO13 for TP4056 CHRG on the selected ESP32-CAM profile.
+2. **Sensor failure visibility:** serial telemetry now includes `NS` and `BS` flags. The dashboard reports sensor faults instead of treating retained previous angles as healthy current data.
+3. **Stale serial stream:** the dashboard marks live data as stale after 2.5 seconds without valid telemetry and updates connection/status UI.
+4. **3D preview-to-live handoff:** entering live mode clears the manual preview lock, allowing real orientation readings to drive the torso and head.
+5. **Calibration feedback:** the dashboard handles firmware `CALIBRATED` and `CALIBRATION FAILED` messages and indicates when calibration is needed.
+6. **Firmware I²C write errors:** MPU initialization stops if register writes fail and rechecks sensor identity after configuration.
+7. **Battery/charger wording:** the UI describes `FULL` as a near-full-voltage estimate, not confirmed charge completion; missing charger-state fields are not presented as definitive “not charging.”
+8. **Workflow permissions:** Pages workflow no longer tries to enable or create a Pages site using the workflow token. Enable Pages once in repository Settings → Pages → GitHub Actions.
+9. **CI coverage:** the build workflow compiles both board profiles.
+10. **Circuit protection:** the Wokwi diagram includes a 220 Ω resistor in series with the status LED.
+11. **Asset stability and styling:** external model asset is pinned to a source commit, and 3D point colors match the muted dashboard palette.
+12. **Documentation:** removed duplicate README sections and corrected battery/charger pin information.
+
+## Remaining physical verification
+
+- Confirm exact ESP32-CAM board revision and strapping behavior for GPIO2/GPIO15, and that GPIO34 is accessible.
+- Confirm IMU register compatibility, axis directions, and mounting orientation.
+- Measure the divider against a multimeter and calibrate battery percentage for the actual cell/load.
+- Confirm TP4056 CHRG wiring and pull-up implementation.
+- Verify the transistor/MOSFET driver and protection for the haptic motor.
+- Browser-test serial connect/disconnect/calibration on desktop Chromium and confirm GitHub Pages after enabling it.
+- The Android app/Bluetooth link and full physical wearable integration remain out of scope for this repository.

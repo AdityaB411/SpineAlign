@@ -14,8 +14,8 @@
 #define SCL_PIN 15
 #define ALERT_PIN 2
 #define CALIBRATION_BUTTON_PIN -1
-#define BATTERY_ADC_PIN 13
-#define CHARGER_STATUS_PIN 33
+#define BATTERY_ADC_PIN 34
+#define CHARGER_STATUS_PIN 13
 #define BATTERY_MONITOR_ENABLED 1
 #else
 #define SDA_PIN 21
@@ -139,12 +139,12 @@ unsigned long buzzStepStartTime = 0;
 const unsigned long BUZZ_ON_TIME = 150;
 const unsigned long BUZZ_OFF_TIME = 150;
 
-void mpuWriteRegister(uint8_t address, uint8_t reg, uint8_t value)
+bool mpuWriteRegister(uint8_t address, uint8_t reg, uint8_t value)
 {
   Wire.beginTransmission(address);
   Wire.write(reg);
   Wire.write(value);
-  Wire.endTransmission();
+  return Wire.endTransmission() == 0;
 }
 
 bool mpuReadRegisters(uint8_t address, uint8_t startRegister, uint8_t *buffer, uint8_t length)
@@ -178,13 +178,13 @@ bool mpuInit(uint8_t address)
   if (!mpuPresent(address))
     return false;
 
-  mpuWriteRegister(address, MPU_PWR_MGMT_1, 0x00);
-  mpuWriteRegister(address, MPU_SMPLRT_DIV, 9);
-  mpuWriteRegister(address, MPU_CONFIG, 0x03);
-  mpuWriteRegister(address, MPU_GYRO_CONFIG, 0x00);
-  mpuWriteRegister(address, MPU_ACCEL_CONFIG, 0x00);
+  if (!mpuWriteRegister(address, MPU_PWR_MGMT_1, 0x00)) return false;
+  if (!mpuWriteRegister(address, MPU_SMPLRT_DIV, 9)) return false;
+  if (!mpuWriteRegister(address, MPU_CONFIG, 0x03)) return false;
+  if (!mpuWriteRegister(address, MPU_GYRO_CONFIG, 0x00)) return false;
+  if (!mpuWriteRegister(address, MPU_ACCEL_CONFIG, 0x00)) return false;
   delay(100);
-  return true;
+  return mpuPresent(address);
 }
 
 bool mpuReadRaw(uint8_t address, SensorData &data)
@@ -558,6 +558,8 @@ void sendSerialData()
   Serial.print(",BR:"); Serial.print(backRoll, 1);
   Serial.print(",ALERT:"); Serial.print(badPosture ? 1 : 0);
   Serial.print(",CAL:"); Serial.print(isCalibrated ? 1 : 0);
+  Serial.print(",NS:"); Serial.print(neckAvailable ? 1 : 0);
+  Serial.print(",BS:"); Serial.print(backAvailable ? 1 : 0);
   Serial.print(",BAT:"); Serial.print(batteryTelemetryAvailable ? batteryVoltage : -1.0f, 2);
   Serial.print(",PCT:"); Serial.print(batteryTelemetryAvailable ? batteryPercent : -1);
   Serial.print(",CHG:"); Serial.print(batteryTelemetryAvailable ? (batteryCharging ? 1 : 0) : -1);

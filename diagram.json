@@ -3,7 +3,13 @@
   "author": "Aditya",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 9.6, "left": -110.36, "attrs": {} },
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 9.6,
+      "left": -110.36,
+      "attrs": {}
+    },
     {
       "type": "wokwi-mpu6050",
       "id": "imu1",
@@ -25,84 +31,270 @@
       "id": "oled1",
       "top": 166.34,
       "left": 57.83,
-      "attrs": { "i2cAddress": "0x3c", "label": "Status Display" }
+      "attrs": {
+        "i2cAddress": "0x3c",
+        "label": "Status Display"
+      }
     },
     {
       "type": "wokwi-led",
       "id": "led1",
       "top": 15.6,
       "left": -217,
-      "attrs": { "color": "red", "label": "Status" }
+      "attrs": {
+        "color": "red",
+        "label": "Status"
+      }
     },
     {
       "type": "wokwi-pushbutton",
       "id": "btn1",
       "top": 150.2,
       "left": -240,
-      "attrs": { "color": "green", "xray": "1" }
+      "attrs": {
+        "color": "green",
+        "xray": "1"
+      }
     },
     {
       "type": "wokwi-text",
       "id": "label2",
       "top": 259.2,
       "left": 57.6,
-      "attrs": { "text": "Status Display" }
+      "attrs": {
+        "text": "Status Display"
+      }
     },
     {
       "type": "wokwi-text",
       "id": "label3",
       "top": 19.2,
       "left": 297.6,
-      "attrs": { "text": "Neck Sensor" }
+      "attrs": {
+        "text": "Neck Sensor"
+      }
     },
     {
       "type": "wokwi-text",
       "id": "label4",
       "top": 115.2,
       "left": 297.6,
-      "attrs": { "text": "Back Sensor" }
+      "attrs": {
+        "text": "Back Sensor"
+      }
     },
     {
       "type": "wokwi-text",
       "id": "label5",
       "top": -9.6,
       "left": -230.4,
-      "attrs": { "text": "Alert LED" }
+      "attrs": {
+        "text": "Alert LED"
+      }
     },
     {
       "type": "wokwi-text",
       "id": "label6",
       "top": 192,
       "left": -240,
-      "attrs": { "text": "Calibrate" }
+      "attrs": {
+        "text": "Calibrate"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 38,
+      "left": -177,
+      "rotate": 90,
+      "attrs": {
+        "value": "220"
+      }
     }
   ],
   "connections": [
-    [ "esp:TX", "$serialMonitor:RX", "", [] ],
-    [ "esp:RX", "$serialMonitor:TX", "", [] ],
-    [ "imu1:VCC", "esp:3V3", "red", [ "h-28.8", "v-48.08", "h-336", "v38.4" ] ],
-    [ "imu2:VCC", "esp:3V3", "red", [ "h-28.8", "v-144.08", "h-336", "v38.4" ] ],
+    [
+      "esp:TX",
+      "$serialMonitor:RX",
+      "",
+      []
+    ],
+    [
+      "esp:RX",
+      "$serialMonitor:TX",
+      "",
+      []
+    ],
+    [
+      "imu1:VCC",
+      "esp:3V3",
+      "red",
+      [
+        "h-28.8",
+        "v-48.08",
+        "h-336",
+        "v38.4"
+      ]
+    ],
+    [
+      "imu2:VCC",
+      "esp:3V3",
+      "red",
+      [
+        "h-28.8",
+        "v-144.08",
+        "h-336",
+        "v38.4"
+      ]
+    ],
     [
       "oled1:VCC",
       "esp:3V3",
       "red",
-      [ "v-38.4", "h0.15", "v-9.6", "h105.6", "v-144", "h-336", "v38.4" ]
+      [
+        "v-38.4",
+        "h0.15",
+        "v-9.6",
+        "h105.6",
+        "v-144",
+        "h-336",
+        "v38.4"
+      ]
     ],
-    [ "imu1:GND", "esp:GND.2", "black", [ "h0" ] ],
-    [ "imu2:GND", "esp:GND.2", "black", [ "h-38.4", "v-96.08" ] ],
-    [ "imu1:SCL", "esp:23", "green", [ "h0" ] ],
-    [ "imu2:SCL", "esp:23", "green", [ "h-57.6", "v-96.08" ] ],
-    [ "oled1:SCL", "esp:23", "green", [ "v-124.8", "h0.3" ] ],
-    [ "imu2:SDA", "esp:21", "orange", [ "h-86.4", "v-67.28" ] ],
-    [ "imu1:SDA", "esp:21", "orange", [ "h-86.4", "v28.72" ] ],
-    [ "oled1:SDA", "esp:21", "orange", [ "v-86.4", "h0.07" ] ],
-    [ "oled1:GND", "esp:GND.2", "black", [ "v-134.4", "h-9.6" ] ],
-    [ "imu1:AD0", "esp:GND.2", "black", [ "h-38.4", "v0.02" ] ],
-    [ "imu2:AD0", "esp:3V3", "red", [ "h-28.8", "v-201.58", "h-336", "v57.6" ] ],
-    [ "btn1:1.r", "esp:14", "gold", [ "v0" ] ],
-    [ "btn1:2.r", "esp:GND.1", "black", [ "h38.6", "v-19" ] ],
-    [ "led1:A", "esp:25", "purple", [ "v0" ] ],
-    [ "led1:C", "esp:GND.1", "black", [ "v9.6", "h67.6", "v96" ] ]
+    [
+      "imu1:GND",
+      "esp:GND.2",
+      "black",
+      [
+        "h0"
+      ]
+    ],
+    [
+      "imu2:GND",
+      "esp:GND.2",
+      "black",
+      [
+        "h-38.4",
+        "v-96.08"
+      ]
+    ],
+    [
+      "imu1:SCL",
+      "esp:23",
+      "green",
+      [
+        "h0"
+      ]
+    ],
+    [
+      "imu2:SCL",
+      "esp:23",
+      "green",
+      [
+        "h-57.6",
+        "v-96.08"
+      ]
+    ],
+    [
+      "oled1:SCL",
+      "esp:23",
+      "green",
+      [
+        "v-124.8",
+        "h0.3"
+      ]
+    ],
+    [
+      "imu2:SDA",
+      "esp:21",
+      "orange",
+      [
+        "h-86.4",
+        "v-67.28"
+      ]
+    ],
+    [
+      "imu1:SDA",
+      "esp:21",
+      "orange",
+      [
+        "h-86.4",
+        "v28.72"
+      ]
+    ],
+    [
+      "oled1:SDA",
+      "esp:21",
+      "orange",
+      [
+        "v-86.4",
+        "h0.07"
+      ]
+    ],
+    [
+      "oled1:GND",
+      "esp:GND.2",
+      "black",
+      [
+        "v-134.4",
+        "h-9.6"
+      ]
+    ],
+    [
+      "imu1:AD0",
+      "esp:GND.2",
+      "black",
+      [
+        "h-38.4",
+        "v0.02"
+      ]
+    ],
+    [
+      "imu2:AD0",
+      "esp:3V3",
+      "red",
+      [
+        "h-28.8",
+        "v-201.58",
+        "h-336",
+        "v57.6"
+      ]
+    ],
+    [
+      "btn1:1.r",
+      "esp:14",
+      "gold",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "btn1:2.r",
+      "esp:GND.1",
+      "black",
+      [
+        "h38.6",
+        "v-19"
+      ]
+    ],
+    [
+      "led1:A",
+      "esp:25",
+      "purple",
+      [
+        "v0"
+      ]
+    ],
+    [
+      "led1:C",
+      "esp:GND.1",
+      "black",
+      [
+        "v9.6",
+        "h67.6",
+        "v96"
+      ]
+    ]
   ],
   "dependencies": {}
 }

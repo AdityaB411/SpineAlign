@@ -44,5 +44,8 @@ jobs:
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1306"
 
-      - name: Compile firmware
+      - name: Compile Wokwi / ESP32 DevKit profile
         run: arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir build .
+
+      - name: Compile physical AI-Thinker ESP32-CAM profile
+        run: arduino-cli compile --fqbn esp32:esp32:esp32cam --build-property "compiler.cpp.extra_flags=-DSPINEALIGN_TARGET_ESP32_CAM=1" --output-dir build-cam .

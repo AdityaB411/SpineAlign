@@ -1,31 +1,47 @@
-# SpineAlign Dashboard
-
-A responsive browser dashboard for SpineAlign. It shows neck/back angles, posture status, recent history, connection state, a particle-style two-sensor 3D posture view, and battery / charging telemetry.
+# SpineAlign Dashboard Setup
 
 ## Run locally
 
-Open `index.html` in a browser for the demo dashboard. For live USB serial, serve this directory from localhost or HTTPS and use a desktop Chromium-based browser with Web Serial enabled.
+From the repository root:
 
 ```sh
-python -m http.server 8000
+python3 -m http.server 8000
 ```
 
-Then visit `http://localhost:8000`.
+Open `http://localhost:8000`. Demo mode and preview controls work without hardware. Live USB serial requires desktop Chromium, Web Serial support, a secure context, and firmware at 115200 baud. Close Arduino Serial Monitor before connecting.
+
+## Telemetry
+
+The firmware sends `N`, `B`, `NP`, `NR`, `BP`, `BR`, `ALERT`, `CAL`, `NS`, `BS`, `BAT`, `PCT`, `CHG`, and `FULL`. Sensor-validity flags (`NS` and `BS`) let the dashboard distinguish a real low angle from a sensor read failure. The dashboard also detects a serial stream that has stopped arriving. Calibration responses are shown as dashboard messages.
 
 ## 3D model
 
-The dashboard loads `human_posed.glb` from [UMRAM-Bilkent/supine-human-model](https://github.com/UMRAM-Bilkent/supine-human-model), a CC0 1.0 adaptation of a Quaternius character. The existing mesh surface is sampled into a point cloud. The back IMU drives the torso and the neck IMU drives the head relative to the torso. If the external model cannot be fetched, a built-in point figure is used. Four sliders allow a demo of forward/backward and sideways movement.
+The dashboard loads the CC0 `human_posed.glb` model from a pinned source revision, then samples its surface into a point cloud. Back pitch/roll move the torso; neck pitch/roll adjust the head relative to the torso. A built-in point-figure fallback is used if the model asset fails to load. An internet connection is required for Three.js and the model asset.
 
-Current telemetry fields: `N`, `B`, `NP`, `NR`, `BP`, `BR`, `ALERT`, `CAL`, `BAT`, `PCT`, `CHG`, and `FULL`. `N/B` are scalar tilt magnitudes for the existing alert cards. `NP/NR` and `BP/BR` are pitch/roll.
+## Physical ESP32-CAM battery wiring
 
-## Battery / TP4056
+Set `SPINEALIGN_TARGET_ESP32_CAM` to `1` in `SpineAlign.ino`. The firmware pin mapping is:
 
-For the physical ESP32-CAM profile, set `SPINEALIGN_TARGET_ESP32_CAM` to `1` in `SpineAlign.ino`. The profile assumes I²C SDA=GPIO14, SCL=GPIO15, battery ADC=GPIO34, TP4056 CHRG=GPIO13, and alert transistor input=GPIO2. GPIO14/15 assume the microSD interface is unused; GPIO15 is a strapping pin, so verify boot behavior on your exact board revision.
+| Function | GPIO |
+|---|---:|
+| I²C SDA | 14 |
+| I²C SCL | 15 |
+| Alert / driver input | 2 |
+| Battery ADC | 34 |
+| TP4056 CHRG | 13 |
 
-Use an equal resistor divider (e.g. 100 kΩ + 100 kΩ) from battery-positive to GND with its midpoint to GPIO34. A 4.2 V cell gives about 2.1 V at the ADC. Never connect cell voltage directly to an ESP32 GPIO or 3V3 rail. Pull the TP4056 active-low, open-drain CHRG signal up to 3.3 V. The percentage is a rough voltage-based estimate, and a high-impedance CHRG signal cannot distinguish “charger unplugged” from “charge complete”; firmware only reports a near-full voltage estimate in that case. Use a suitable regulator / protected cell arrangement; a TP4056 is not a regulated boost converter or load-sharing controller. Drive any haptic motor through a properly rated transistor/MOSFET, never directly from a GPIO.
+GPIO34 is an ADC1 input for battery voltage. GPIO13 is the TP4056 CHRG input, so keep the microSD interface unused; GPIO14/15 also overlap with the microSD interface. GPIO15 and GPIO2 are boot-sensitive on relevant ESP32 boards, so verify the exact board revision and boot behavior before connecting them.
 
-The current Wokwi/DevKit profile keeps battery monitoring disabled and sends unavailable battery values. Actual battery measurements require the physical wiring and profile.
+Use an equal resistor divider, for example 100 kΩ from BAT+ to the ADC node and 100 kΩ from that node to common GND. Connect the node to GPIO34. A 4.2 V cell then produces about 2.1 V at the ADC. Connect TP4056 CHRG to GPIO13 with a pull-up to 3.3 V; it is active-low and open-drain. Never connect cell voltage directly to a GPIO or 3V3 rail. A TP4056 is a charger, not a regulated boost converter or load-sharing controller. Use a protected cell and a suitable regulator for the selected board. Drive a vibration motor through a suitable transistor/MOSFET and protection components, not directly from a GPIO.
 
-## Local dependencies
+Battery percentage is only a rough voltage estimate and changes with load and cell characteristics. `FULL:1` means voltage suggests near-full while CHRG is inactive; it cannot distinguish charger-unplugged from charge-complete.
 
-Three.js modules load from jsDelivr and the CC0 human asset is loaded from jsDelivr. Internet access is therefore required to display the source model; the dashboard includes a local particle fallback.
+## Physical validation checklist
+
+1. Confirm both IMUs initialize at addresses `0x68` and `0x69`.
+2. Check neck/back pitch and roll signs with controlled movements after final mounting.
+3. Disconnect one sensor and confirm the dashboard shows a sensor fault.
+4. Stop the serial stream and confirm the dashboard reports stale data.
+5. Compare battery voltage against a multimeter over the operating range.
+6. Observe CHRG during charging, unplugged, and near completion.
+7. Verify boot with GPIO2/15 and the alert-driver circuit connected.

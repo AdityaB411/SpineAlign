@@ -1,57 +1,44 @@
-# SpineAlign Dashboard
+# SpineAlign Lite
 
-A responsive, single-page dashboard for the SpineAlign dual-sensor posture prototype. It shows neck and back angles, current posture status, a small recent-history chart, connection status, and the future two-sensor 3D view plan.
+SpineAlign Lite is a dual-IMU posture-monitoring prototype. The firmware reads neck and back sensors, filters pitch/roll, compares deviation against a session calibration reference, and gives a local alert after sustained deviation. This repository includes the Wokwi ESP32 DevKit simulation and a browser dashboard with demo and USB-serial live modes.
 
-## Run locally
+## Run the dashboard locally
 
-Open `index.html` in a browser to explore the demo dashboard. For live USB serial communication, serve the files from `http://localhost` or HTTPS, then use a desktop Chromium-based browser that supports Web Serial.
-
-A quick local server from this folder:
+From the repository root:
 
 ```sh
-python -m http.server 8000
+python3 -m http.server 8000
 ```
 
-Then visit `http://localhost:8000`.
+Open `http://localhost:8000`. Demo mode works without hardware. Live USB serial requires a desktop Chromium-based browser supporting Web Serial over a secure context (localhost or HTTPS). Close Arduino Serial Monitor before connecting from the browser.
 
-## Live device protocol
+## Firmware profiles
 
-The current firmware streams lines in this format at 115200 baud:
+- **Wokwi / ESP32 DevKit:** default `SPINEALIGN_TARGET_ESP32_CAM=0`; I²C SDA 21, SCL 23; calibration button GPIO14; alert LED GPIO25.
+- **Physical AI-Thinker ESP32-CAM:** set `SPINEALIGN_TARGET_ESP32_CAM=1`; I²C SDA 14, SCL 15; alert-driver input GPIO2; battery ADC GPIO34; TP4056 CHRG GPIO13; calibration via USB serial `CALIBRATE`.
+
+The physical profile uses GPIO34 (ADC1) for the battery divider and GPIO13 for the active-low, open-drain TP4056 CHRG signal. Use [the hardware notes](docs/Hardware_Orientation_Battery.md) as the wiring reference. GPIOs 13/14/15 share pins with the ESP32-CAM microSD interface, which must remain unused. GPIO2 and GPIO15 can affect boot, so verify the exact board revision and boot behavior before soldering. Use the recommended divider, a suitable regulator, and a protected cell. Never connect a Li-ion cell directly to a GPIO or 3V3 input; never drive a haptic motor directly from a GPIO.
+
+## Live serial protocol
+
+Firmware streams at 115200 baud, for example:
 
 ```text
-N:5.2,B:8.7,ALERT:0
+N:5.2,B:8.7,NP:4.1,NR:1.0,BP:7.2,BR:-2.1,ALERT:0,CAL:1,NS:1,BS:1,BAT:3.87,PCT:78,CHG:0,FULL:0
 ```
 
-The dashboard reads the `N` and `B` angle values and can send `CALIBRATE` followed by a newline when the device is connected. The displayed values are relative to the firmware's calibration reference.
+- `N` / `B`: combined pitch/roll deviation magnitude for neck/back.
+- `NP` / `NR`, `BP` / `BR`: pitch/roll values used by the 3D view.
+- `ALERT`: firmware posture-threshold state; `CAL`: calibration flag.
+- `NS` / `BS`: latest sensor-read validity flags. A zero indicates that the latest raw sensor read failed.
+- `BAT` / `PCT`: approximate single-cell voltage and voltage-derived percentage; `CHG` / `FULL`: TP4056 CHRG state and a near-full-voltage estimate. `FULL:1` does not prove that the charger is connected or charging has completed.
 
-## Demo controls
+The dashboard sends `CALIBRATE\n` over USB. Firmware responds with `CALIBRATED` or `CALIBRATION FAILED`, and the dashboard displays the result.
 
-- **Connect device:** asks the browser for an ESP32 serial port.
-- **Calibrate sensors:** sends `CALIBRATE` in live mode or resets the demo reference in demo mode.
-- **Simulate slouch:** raises the demo readings above the 15° threshold so the warning state can be previewed.
+## CI, deployment, and limitations
 
-## Deploy
+GitHub Actions validates dashboard JavaScript and compiles both the Wokwi DevKit profile and physical ESP32-CAM profile. These checks do not validate sensor axis orientation, boot-strapping behavior, battery voltage accuracy, charging, or haptic electronics on physical hardware.
 
-The repository includes `.github/workflows/pages.yml` to publish just `index.html`, `styles.css`, and `app.js` to GitHub Pages. If Pages is not yet enabled for the repository, enable it under **Settings → Pages** and select **GitHub Actions** as the build and deployment source. The workflow then runs on dashboard changes and can also be started manually.
+Enable GitHub Pages once under **Settings → Pages → Build and deployment → Source → GitHub Actions**. After it is enabled, the deployment workflow publishes the dashboard when web assets change.
 
-The 3D posture model is a planned extension, not a current feature. It will need independent orientation data for both the neck and back sensors before model joints can follow pitch/roll movement accurately.
-
-
-## Particle 3D orientation and battery telemetry
-
-The dashboard uses the existing [CC0 1.0 human model](https://github.com/UMRAM-Bilkent/supine-human-model) as source geometry and samples it into a particle silhouette. Three.js drives separate torso and head groups: back pitch/roll tilts the torso, while neck pitch/roll adjusts the head relative to the torso. Four preview sliders let you test movement before the hardware is connected. A lightweight built-in point figure is used if the external model cannot be fetched.
-
-The updated firmware telemetry retains scalar `N` and `B` and adds `NP`, `NR`, `BP`, and `BR` orientation, `CAL` calibration state, and `BAT`, `PCT`, `CHG`, and `FULL` battery fields. The default Wokwi profile reports battery data as unavailable. For physical hardware, enable the ESP32-CAM profile and wire the battery divider to GPIO13 and TP4056 CHRG to GPIO33 as documented for the selected board as described in [Hardware, orientation and battery notes](docs/Hardware_Orientation_Battery.md).
-
-Battery percentage is a rough voltage estimate. TP4056 CHRG is active-low and open-drain; by itself it cannot distinguish an unplugged charger from a completed charge. The 3D mapping also depends on IMU mounting and axis signs, so validate both on real hardware.
-
-
-## Particle 3D orientation and battery telemetry
-
-The dashboard uses the existing [CC0 1.0 human model](https://github.com/UMRAM-Bilkent/supine-human-model) as source geometry and samples it into a particle silhouette. Three.js drives separate torso and head groups: back pitch/roll tilts the torso, while neck pitch/roll adjusts the head relative to the torso. Four preview sliders let you test movement before the hardware is connected. A lightweight built-in point figure is used if the external model cannot be fetched.
-
-The updated firmware telemetry retains scalar `N` and `B` and adds `NP`, `NR`, `BP`, and `BR` orientation, `CAL` calibration state, and `BAT`, `PCT`, `CHG`, and `FULL` battery fields. The default Wokwi profile reports battery data as unavailable. For physical hardware, enable the ESP32-CAM profile and wire the battery divider / TP4056 status output as described in [Hardware, orientation and battery notes](docs/Hardware_Orientation_Battery.md).
-
-Battery percentage is a rough voltage estimate. TP4056 CHRG is active-low and open-drain; by itself it cannot distinguish an unplugged charger from a completed charge. The 3D mapping also depends on IMU mounting and axis signs, so validate both on real hardware.
-
-The raw-I²C sensor setup accepts both the common MPU6050 `WHO_AM_I=0x68` and compatible MPU6500-family modules that report `0x70`. Axis direction and sensor register compatibility still need to be verified on the specific modules fitted to the wearable.
+The 3D view samples a CC0 human mesh and animates approximate torso/head rotations from the two IMUs. Check the pose and axis signs against the final sensor mounts. This is a student prototype, not a medical diagnostic device. The Android companion app/Bluetooth link and full physical wearable integration are not implemented in this repository yet.

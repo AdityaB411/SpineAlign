@@ -313,7 +313,9 @@
     if (els.deviceStatusTitle) els.deviceStatusTitle.textContent = state.calibrationKnown && !state.isCalibrated ? 'ESP32 connected · calibrate sensors' : 'ESP32 connected';
     els.neckDeviceStatus.textContent = 'Reading'; els.backDeviceStatus.textContent = 'Reading';
     els.neckDeviceIndicator.className = 'tiny-indicator good'; els.backDeviceIndicator.className = 'tiny-indicator good';
-    renderReadings(); renderBattery(); addHistorySample();
+    renderReadings();
+    renderBattery();
+    if (state.neckSensorOk && state.backSensorOk && (!state.calibrationKnown || state.isCalibrated)) addHistorySample();
   }
 
   function handleSerialLine(line) {

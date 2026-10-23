@@ -1,9 +1,29 @@
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
-import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js";
-import { MeshSurfaceSampler } from "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/math/MeshSurfaceSampler.js";
-import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js";
-
-(() => {
+(async () => {
+  'use strict';
+  let THREE, GLTFLoader, MeshSurfaceSampler, OrbitControls;
+  try {
+    const [threeModule, gltfModule, samplerModule, controlsModule] = await Promise.all([
+      import("https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"),
+      import("https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js"),
+      import("https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/math/MeshSurfaceSampler.js"),
+      import("https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js")
+    ]);
+    THREE = threeModule;
+    GLTFLoader = gltfModule.GLTFLoader;
+    MeshSurfaceSampler = samplerModule.MeshSurfaceSampler;
+    OrbitControls = controlsModule.OrbitControls;
+  } catch (error) {
+    console.error('3D dependencies could not be loaded:', error);
+    const loader = document.getElementById('modelLoading');
+    const label = document.getElementById('modelLoadingText');
+    const status = document.getElementById('modelStatusText');
+    const controls = document.getElementById('modelDemoControls');
+    if (label) label.textContent = '3D view unavailable. Check your internet connection or CDN access.';
+    if (loader) loader.hidden = false;
+    if (status) status.textContent = 'Unavailable';
+    if (controls) controls.querySelectorAll('input,button').forEach(el => { el.disabled = true; });
+    return;
+  }
   'use strict';
   const canvas=document.getElementById('posture3dCanvas'); if(!canvas)return;
   const MODEL_URL='https://cdn.jsdelivr.net/gh/UMRAM-Bilkent/supine-human-model@728f23ab5eb9d6cb2c8fb39acb3440bd81db0d3e/assets/human_posed.glb';
@@ -11,7 +31,18 @@ import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.170.0/exampl
   const $=id=>document.getElementById(id),clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,Number(v)||0));
   const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0xeaf0e6,.035);
   const camera=new THREE.PerspectiveCamera(34,1,.1,60);camera.position.set(0,1.68,5.7);camera.lookAt(0,1.52,0);
-  const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'low-power'});
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference:'low-power'});
+  } catch (error) {
+    console.error('WebGL is unavailable:', error);
+    const loader = $('modelLoading'), label = $('modelLoadingText'), status = $('modelStatusText');
+    if (label) label.textContent = '3D view unavailable because WebGL could not be initialized.';
+    if (loader) loader.hidden = false;
+    if (status) status.textContent = 'Unavailable';
+    $('modelDemoControls')?.querySelectorAll('input,button').forEach(el => { el.disabled = true; });
+    return;
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setClearColor(0xeaf0e6,0);renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;
   const controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,1.52,0);controls.enablePan=false;controls.enableDamping=true;controls.dampingFactor=.07;controls.minDistance=3.8;controls.maxDistance=8;controls.minPolarAngle=.22;controls.maxPolarAngle=Math.PI-.22;
   scene.add(new THREE.HemisphereLight(0xffffff,0xa7b49f,1.35));const light=new THREE.DirectionalLight(0xffffff,1);light.position.set(2.6,4.3,4.5);scene.add(light);

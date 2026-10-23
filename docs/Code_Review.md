@@ -8,7 +8,7 @@
 
 ## Issues fixed in this revision
 
-1. **Battery pin mismatch:** firmware and documentation agree on GPIO34 for the battery divider (ADC1) and GPIO13 for TP4056 CHRG on the selected ESP32-CAM profile.
+1. **Battery pin mismatch:** firmware and documentation agree on GPIO13 for the battery divider (ADC2, Wi-Fi disabled) and GPIO33 for TP4056 CHRG on the selected ESP32-CAM profile.
 2. **Sensor failure visibility:** serial telemetry now includes `NS` and `BS` flags. The dashboard reports sensor faults instead of treating retained previous angles as healthy current data.
 3. **Stale serial stream:** the dashboard marks live data as stale after 2.5 seconds without valid telemetry and updates connection/status UI.
 4. **3D preview-to-live handoff:** entering live mode clears the manual preview lock, allowing real orientation readings to drive the torso and head.
@@ -23,7 +23,7 @@
 
 ## Remaining physical verification
 
-- Confirm exact ESP32-CAM board revision and strapping behavior for GPIO2/GPIO15, and that GPIO34 is accessible.
+- Confirm the exact ESP32-CAM board revision, boot-strapping behavior for GPIO2/GPIO15, GPIO33 pad access, and isolation from any onboard indicator LED.
 - Confirm IMU register compatibility, axis directions, and mounting orientation.
 - Measure the divider against a multimeter and calibrate battery percentage for the actual cell/load.
 - Confirm TP4056 CHRG wiring and pull-up implementation.

@@ -27,12 +27,12 @@ Set `SPINEALIGN_TARGET_ESP32_CAM` to `1` in `SpineAlign.ino`. The firmware pin m
 | I²C SDA | 14 |
 | I²C SCL | 15 |
 | Alert / driver input | 2 |
-| Battery ADC | 34 |
-| TP4056 CHRG | 13 |
+| Battery ADC | 13 |
+| TP4056 CHRG | 33 |
 
-GPIO34 is an ADC1 input for battery voltage. GPIO13 is the TP4056 CHRG input, so keep the microSD interface unused; GPIO14/15 also overlap with the microSD interface. GPIO15 and GPIO2 are boot-sensitive on relevant ESP32 boards, so verify the exact board revision and boot behavior before connecting them.
+GPIO13 is an ADC2 input for battery voltage, so keep Wi-Fi disabled (the intended physical profile is Bluetooth-only). GPIO13, GPIO14 and GPIO15 overlap with the microSD interface, so the SD slot must remain unused. GPIO33 may be connected to an onboard indicator and is not brought out on every revision; confirm the exact schematic/pad and isolate any LED load before using it for TP4056 CHRG. GPIO15 and GPIO2 are boot-sensitive, so verify the exact board revision before connecting them.
 
-Use an equal resistor divider, for example 100 kΩ from BAT+ to the ADC node and 100 kΩ from that node to common GND. Connect the node to GPIO34. A 4.2 V cell then produces about 2.1 V at the ADC. Connect TP4056 CHRG to GPIO13 with a pull-up to 3.3 V; it is active-low and open-drain. Never connect cell voltage directly to a GPIO or 3V3 rail. A TP4056 is a charger, not a regulated boost converter or load-sharing controller. Use a protected cell and a suitable regulator for the selected board. Drive a vibration motor through a suitable transistor/MOSFET and protection components, not directly from a GPIO.
+Use an equal resistor divider, for example 100 kΩ from BAT+ to the ADC node and 100 kΩ from that node to common GND. Connect the node to GPIO13. A 4.2 V cell then produces about 2.1 V at the ADC. Connect TP4056 CHRG to GPIO13 with a pull-up to 3.3 V; it is active-low and open-drain. Never connect cell voltage directly to a GPIO or 3V3 rail. A TP4056 is a charger, not a regulated boost converter or load-sharing controller. Use a protected cell and a suitable regulator for the selected board. Drive a vibration motor through a suitable transistor/MOSFET and protection components, not directly from a GPIO.
 
 Battery percentage is only a rough voltage estimate and changes with load and cell characteristics. `FULL:1` means voltage suggests near-full while CHRG is inactive; it cannot distinguish charger-unplugged from charge-complete.
 

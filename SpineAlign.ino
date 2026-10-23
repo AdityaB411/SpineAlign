@@ -14,8 +14,8 @@
 #define SCL_PIN 15
 #define ALERT_PIN 2
 #define CALIBRATION_BUTTON_PIN -1
-#define BATTERY_ADC_PIN 34
-#define CHARGER_STATUS_PIN 13
+#define BATTERY_ADC_PIN 13
+#define CHARGER_STATUS_PIN 33
 #define BATTERY_MONITOR_ENABLED 1
 #else
 #define SDA_PIN 21
@@ -275,6 +275,16 @@ void updateBatteryTelemetry()
 
 void calibrateSensors()
 {
+  // A failed recalibration must not leave stale calibration marked as valid.
+  isCalibrated = false;
+  badPosture = false;
+  alertActive = false;
+  badPostureStartTime = 0;
+  lastAlertTime = 0;
+  currentBuzz = BUZZ_NONE;
+  currentBuzzStep = BUZZ_IDLE;
+  digitalWrite(ALERT_PIN, LOW);
+
   SensorData neckData, backData;
   bool neckReadOK = mpuReadRaw(NECK_MPU_ADDRESS, neckData);
   bool backReadOK = mpuReadRaw(BACK_MPU_ADDRESS, backData);

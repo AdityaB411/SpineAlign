@@ -15,16 +15,16 @@ Set `SPINEALIGN_TARGET_ESP32_CAM` to `1` in `SpineAlign.ino` for the physical pr
 | I²C SDA | 14 |
 | I²C SCL | 15 |
 | Alert / haptic-driver input | 2 |
-| Battery ADC | 34 |
-| TP4056 CHRG status | 13 |
+| Battery ADC | 13 |
+| TP4056 CHRG status | 33 |
 | Calibration | USB serial `CALIBRATE` |
 
-GPIO34 is ADC1 and input-only, making it suitable for the battery divider if it is available on the selected board/breakout. GPIO13/14/15 also belong to the ESP32-CAM microSD pin group, so the microSD interface must remain unused. GPIO15 and GPIO2 can affect boot on ESP32 boards; confirm the exact board variant, strapping requirements, and boot behavior before soldering. Confirm GPIO34 is actually accessible on your board; breakout availability varies.
+GPIO13 is an ADC2 input and is available on the typical header, but ADC2 sampling requires Wi-Fi disabled; this build is intended to use Bluetooth only. GPIO13/14/15 also belong to the ESP32-CAM microSD pin group, so the SD interface must remain unused. GPIO33 can be connected to an onboard status LED on some revisions and may not be available on a standard header; confirm the exact schematic/pad and isolate any LED load before attaching CHRG. GPIO15 and GPIO2 are boot-sensitive; confirm the exact board before soldering.
 
 ## Battery voltage divider
 
 - Battery positive / TP4056 BAT+ → **100 kΩ resistor** → ADC node.
-- ADC node → GPIO34 and top of a second **100 kΩ resistor**.
+- ADC node → GPIO13 and top of a second **100 kΩ resistor**.
 - Second resistor → common battery/ESP32 GND.
 - TP4056 CHRG → GPIO13 with a pull-up to **3.3 V**; active-low and open-drain.
 - ESP32, charger, and battery must share ground.

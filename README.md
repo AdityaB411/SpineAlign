@@ -15,9 +15,9 @@ Open `http://localhost:8000`. Demo mode works without hardware. Live USB serial 
 ## Firmware profiles
 
 - **Wokwi / ESP32 DevKit:** default `SPINEALIGN_TARGET_ESP32_CAM=0`; I²C SDA 21, SCL 23; calibration button GPIO14; alert LED GPIO25.
-- **Physical AI-Thinker ESP32-CAM:** set `SPINEALIGN_TARGET_ESP32_CAM=1`; I²C SDA 14, SCL 15; alert-driver input GPIO2; battery ADC GPIO34; TP4056 CHRG GPIO13; calibration via USB serial `CALIBRATE`.
+- **Physical AI-Thinker ESP32-CAM:** set `SPINEALIGN_TARGET_ESP32_CAM=1`; I²C SDA 14, SCL 15; alert-driver input GPIO2; battery ADC GPIO13; TP4056 CHRG GPIO33; calibration via USB serial `CALIBRATE`.
 
-The physical profile uses GPIO34 (ADC1) for the battery divider and GPIO13 for the active-low, open-drain TP4056 CHRG signal. Use [the hardware notes](docs/Hardware_Orientation_Battery.md) as the wiring reference. GPIOs 13/14/15 share pins with the ESP32-CAM microSD interface, which must remain unused. GPIO2 and GPIO15 can affect boot, so verify the exact board revision and boot behavior before soldering. Use the recommended divider, a suitable regulator, and a protected cell. Never connect a Li-ion cell directly to a GPIO or 3V3 input; never drive a haptic motor directly from a GPIO.
+GPIO13 is used for the battery divider (ADC2), and GPIO33 is used for the active-low, open-drain TP4056 CHRG status input. ADC2 reads require Wi-Fi to stay off; the intended physical profile is Bluetooth-only. GPIO13/14/15 share pins with the ESP32-CAM microSD interface, which must remain unused. GPIO33 is not exposed on every board revision and may be connected to an onboard indicator; confirm the exact schematic/pad and isolate any LED load before attaching CHRG. GPIO2 and GPIO15 can affect boot, so verify the exact board revision and boot behavior before soldering. Use the recommended divider, a suitable regulator, and a protected cell. Never connect a Li-ion cell directly to a GPIO or 3V3 input; never drive a haptic motor directly from a GPIO.
 
 ## Live serial protocol
 

@@ -1,7 +1,7 @@
 /* Shared, dependency-free SpineAlign telemetry parser for browser and Node tests. */
 (function(root) {
   'use strict';
-  const KNOWN_FIELDS = new Set(['N','B','NP','NR','BP','BR','ALERT','CAL','NS','BS','BAT','PCT','CHG','FULL']);
+  const KNOWN_FIELDS = new Set(['N','B','NP','NR','BP','BR','MODE','ALERT','CAL','NS','BS','BAT','PCT','CHG','FULL']);
   const ANGLE_FIELDS = ['N','B','NP','NR','BP','BR'];
   const BOOL_FIELDS = ['ALERT','CAL','NS','BS'];
   const TRI_STATE_FIELDS = ['CHG','FULL'];
@@ -27,6 +27,7 @@
     for (const key of ANGLE_FIELDS) {
       if (fields[key] !== undefined && Math.abs(fields[key]) > 360) return null;
     }
+    if (fields.MODE !== undefined && fields.MODE !== 1 && fields.MODE !== 2) return null;
     for (const key of BOOL_FIELDS) {
       if (fields[key] !== undefined && fields[key] !== 0 && fields[key] !== 1) return null;
     }

@@ -59,3 +59,9 @@ test('does not coerce missing optional values to zero', () => {
   assert.equal(parsed.NP, undefined);
   assert.equal(parsed.CHG, undefined);
 });
+
+test('validates the explicit physical sensor mode', () => {
+  assert.equal(parseLine('N:0,B:4.3,MODE:1,NS:0,BS:1,ALERT:0,CAL:1,BAT:3.9,PCT:80,CHG:0,FULL:0').MODE, 1);
+  assert.equal(parseLine('N:2,B:4.3,MODE:2,NS:1,BS:1').MODE, 2);
+  assert.equal(parseLine('N:0,B:4.3,MODE:0'), null);
+});

@@ -25,6 +25,7 @@
 
   const state = {
     mode: 'demo', connected: false, port: null, reader: null, readTask: null, writer: null, keepReading: false,
+    singleSensorMode: false,
     neck: 5.2, back: 8.7, neckPitch: 4.0, neckRoll: 0.8, backPitch: 7.0, backRoll: -1.2,
     batteryVoltage: 3.87, batteryPercent: 78, batteryCharging: false, batteryFull: false, batteryAvailable: false,
     calibrationKnown: false, isCalibrated: false, firmwareAlert: false, firmwareAlertKnown: false,
@@ -65,10 +66,11 @@
     const live = state.mode === 'live';
     const stale = live && state.linkStale;
     const waiting = live && !state.hasLiveReading && !stale;
-    const sensorFault = live && state.hasLiveReading && (!state.neckSensorOk || !state.backSensorOk);
+    document.body.classList.toggle('single-sensor-mode', live && state.singleSensorMode);
+    const sensorFault = live && state.hasLiveReading && (state.singleSensorMode ? !state.backSensorOk : (!state.neckSensorOk || !state.backSensorOk));
     const uncalibrated = live && state.hasLiveReading && state.calibrationKnown && !state.isCalibrated && !sensorFault && !stale;
-    const overallBad = live && state.firmwareAlertKnown ? state.firmwareAlert : (neckBad || backBad);
-    const worst = Math.max(Math.abs(state.neck), Math.abs(state.back));
+    const overallBad = live && state.firmwareAlertKnown ? state.firmwareAlert : (state.singleSensorMode ? backBad : (neckBad || backBad));
+    const worst = state.singleSensorMode ? Math.abs(state.back) : Math.max(Math.abs(state.neck), Math.abs(state.back));
 
     els.neckAngle.textContent = angleString(state.neck);
     els.backAngle.textContent = angleString(state.back);
@@ -98,19 +100,19 @@
     if (waiting) {
       els.statusTitle.textContent = 'Waiting for sensor data';
       els.statusBadge.textContent = 'Connecting';
-      els.statusDescription.textContent = 'USB is connected. Waiting for a valid reading from the firmware.';
+      els.statusDescription.textContent = 'Device link is connected. Waiting for a valid reading from the firmware.';
       els.statusFootIcon.textContent = '…';
       els.statusFootText.textContent = 'No live sample received yet';
     } else if (stale) {
       els.statusTitle.textContent = 'Live data has stopped';
       els.statusBadge.textContent = 'Stale data';
-      els.statusDescription.textContent = 'No valid telemetry has arrived recently. Check the USB cable, serial monitor, and firmware.';
+      els.statusDescription.textContent = 'No valid telemetry has arrived recently. Check the device connection and firmware.';
       els.statusFootIcon.textContent = '!';
       els.statusFootText.textContent = 'Displayed angles may be old';
     } else if (sensorFault) {
       els.statusTitle.textContent = 'Sensor unavailable';
       els.statusBadge.textContent = 'Check hardware';
-      els.statusDescription.textContent = `${!state.neckSensorOk && !state.backSensorOk ? 'Both sensors are' : !state.neckSensorOk ? 'The neck sensor is' : 'The back sensor is'} not responding. Affected angle values may be from an earlier sample.`;
+      els.statusDescription.textContent = `${state.singleSensorMode ? 'The back sensor is' : !state.neckSensorOk && !state.backSensorOk ? 'Both sensors are' : !state.neckSensorOk ? 'The neck sensor is' : 'The back sensor is'} not responding. Affected angle values may be from an earlier sample.`;
       els.statusFootIcon.textContent = '!';
       els.statusFootText.textContent = 'Posture monitoring is paused';
     } else if (uncalibrated) {
@@ -124,7 +126,7 @@
       els.statusBadge.textContent = overallBad ? 'Needs attention' : 'Within range';
       els.statusDescription.textContent = overallBad
         ? `Your ${neckBad && backBad ? 'neck and back angles are' : neckBad ? 'neck angle is' : 'back angle is'} outside the configured range. Return toward your calibrated position.`
-        : 'Both sensors are below the configured posture threshold.';
+        : (state.singleSensorMode ? 'The back sensor is below the configured posture threshold.' : 'Both sensors are below the configured posture threshold.');
       els.statusFootIcon.textContent = overallBad ? '!' : '✓';
       els.statusFootText.textContent = overallBad ? `Maximum deviation: ${worst.toFixed(1)}°` : 'You are in your target range';
     }
@@ -222,10 +224,11 @@
     ctx.strokeStyle = '#c59a66'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.restore();
     ctx.fillStyle = '#a98250'; ctx.textAlign = 'right'; ctx.fillText('15°', width - pad.right, thresholdY - 8);
 
-    const lines = [
+    const allLines = [
       { key: 'neck', color: '#c28f68', fill: 'rgba(194,143,104,.10)' },
       { key: 'back', color: '#789d80', fill: 'rgba(120,157,128,.10)' }
     ];
+    const lines = state.singleSensorMode ? allLines.filter((line) => line.key === 'back') : allLines;
     lines.forEach((line) => {
       const points = state.history.map((sample, index) => ({
         x: pad.left + (index / Math.max(1, state.history.length - 1)) * plotW,
@@ -261,9 +264,9 @@
       : 'Example values are shown so you can explore the dashboard.';
     els.connectionType.textContent = live ? 'USB serial · 115200 baud' : 'Demo mode';
     els.chartModeText.textContent = live ? 'Live sensor readings' : 'Demo readings';
-    els.neckDeviceStatus.textContent = live ? (state.hasLiveReading ? 'Reading' : 'Waiting') : 'Simulated';
+    els.neckDeviceStatus.textContent = live ? (state.singleSensorMode ? 'Not fitted' : (state.hasLiveReading ? 'Reading' : 'Waiting')) : 'Simulated';
     els.backDeviceStatus.textContent = live ? (state.hasLiveReading ? 'Reading' : 'Waiting') : 'Simulated';
-    els.neckDeviceIndicator.className = `tiny-indicator${live && state.hasLiveReading ? ' good' : ''}`;
+    els.neckDeviceIndicator.className = `tiny-indicator${live && !state.singleSensorMode && state.hasLiveReading ? ' good' : ''}`;
     els.backDeviceIndicator.className = `tiny-indicator${live && state.hasLiveReading ? ' good' : ''}`;
     els.neckDot.style.background = live && !state.hasLiveReading ? '#c59a66' : '#789d80';
     els.backDot.style.background = live && !state.hasLiveReading ? '#c59a66' : '#789d80';
@@ -281,6 +284,8 @@
     const parsed = window.SpineAlignTelemetry && window.SpineAlignTelemetry.parseLine(line);
     if (!parsed) return;
     const readField = (key) => Object.prototype.hasOwnProperty.call(parsed, key) ? parsed[key] : null;
+    const deviceMode = readField('MODE');
+    state.singleSensorMode = deviceMode === 1;
     const neck = readField('N'), back = readField('B');
     if (neck === null || back === null || !Number.isFinite(neck) || !Number.isFinite(back)) return;
     state.neck = neck; state.back = back;
@@ -310,11 +315,13 @@
     els.sideDot.classList.add('is-live');
     els.sideConnectionText.textContent = 'ESP32 connected';
     if (els.deviceStatusTitle) els.deviceStatusTitle.textContent = state.calibrationKnown && !state.isCalibrated ? 'ESP32 connected · calibrate sensors' : 'ESP32 connected';
-    els.neckDeviceStatus.textContent = 'Reading'; els.backDeviceStatus.textContent = 'Reading';
-    els.neckDeviceIndicator.className = 'tiny-indicator good'; els.backDeviceIndicator.className = 'tiny-indicator good';
+    els.neckDeviceStatus.textContent = state.singleSensorMode ? 'Not fitted' : 'Reading';
+    els.backDeviceStatus.textContent = 'Reading';
+    els.neckDeviceIndicator.className = state.singleSensorMode ? 'tiny-indicator' : 'tiny-indicator good';
+    els.backDeviceIndicator.className = 'tiny-indicator good';
     renderReadings();
     renderBattery();
-    if (state.neckSensorOk && state.backSensorOk && (!state.calibrationKnown || state.isCalibrated)) addHistorySample();
+    if ((state.singleSensorMode ? state.backSensorOk : state.neckSensorOk && state.backSensorOk) && (!state.calibrationKnown || state.isCalibrated)) addHistorySample();
   }
 
   function handleSerialLine(line) {
@@ -422,6 +429,8 @@
 
   async function disconnectSerial(showMessage = true) {
     state.keepReading = false;
+    state.singleSensorMode = false;
+    document.body.classList.remove('single-sensor-mode');
     state.connected = false;
     state.hasLiveReading = false;
     state.linkStale = false;

@@ -116,3 +116,13 @@ body{background:var(--bg);color:var(--ink)}
 .page-footer{border-top-color:#e0e6dc;color:#7f8a80}
 .page-footer a{color:#58795d}
 @media(max-width:620px){.welcome-section{min-height:149px;margin:12px 0;padding:22px 17px}.welcome-section h1{font-size:25px}.welcome-art{margin-right:0}.status-card{grid-column:auto}.card-label{letter-spacing:.8px}}
+
+
+/* Single-IMU physical build: hide unmeasured neck panels and chart series. */
+.single-sensor-mode .neck-summary-card,
+.single-sensor-mode .neck-detail,
+.single-sensor-mode .neck-model-reading,
+.single-sensor-mode .model-label-neck,
+.single-sensor-mode .neck-device-row,
+.single-sensor-mode .chart-legend span:first-child { display: none !important; }
+.single-sensor-mode .sensor-detail-grid { grid-template-columns: 1fr; }

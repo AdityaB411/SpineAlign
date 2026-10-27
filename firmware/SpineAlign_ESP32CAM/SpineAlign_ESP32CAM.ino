@@ -23,6 +23,9 @@
 #ifndef SPINEALIGN_OTA_PASSWORD
 #define SPINEALIGN_OTA_PASSWORD ""
 #endif
+#ifndef SPINEALIGN_DUAL_IMU
+#define SPINEALIGN_DUAL_IMU 0
+#endif
 
 // Dedicated physical sketch; root SpineAlign.ino remains the unchanged Wokwi simulation.
 #define SDA_PIN 14
@@ -363,7 +366,7 @@ void updateBatteryTelemetry() {
   const unsigned long now=millis(); if(now-lastBatteryRead<1000) return; lastBatteryRead=now;
   int32_t sum=0;
   for(int i=0;i<4;++i) sum+=batteryADC.readADC_SingleEnded(BATTERY_ADC_CHANNEL);
-  const float halfCellVoltage=batteryADC.computeVolts((int16_t)(sum/8));
+  const float halfCellVoltage=batteryADC.computeVolts((int16_t)(sum/4));
   batteryVoltage=halfCellVoltage*BATTERY_VOLTAGE_DIVIDER_RATIO;
   batteryTelemetryAvailable=batteryVoltage>=2.5f && batteryVoltage<=4.5f;
   batteryPercent=batteryTelemetryAvailable?constrain(voltageToPercent(batteryVoltage),0,100):-1;
@@ -381,49 +384,53 @@ void updateBatteryTelemetry() {
 
 void calibrateSensors()
 {
-  // A failed recalibration must not leave stale calibration marked as valid.
-  isCalibrated = false;
-  badPosture = false;
-  alertActive = false;
-  badPostureStartTime = 0;
-  lastAlertTime = 0;
-  currentBuzz = BUZZ_NONE;
-  currentBuzzStep = BUZZ_IDLE;
-  digitalWrite(ALERT_PIN, LOW);
+  isCalibrated=false; badPosture=false; alertActive=false;
+  badPostureStartTime=0; lastAlertTime=0; currentBuzz=BUZZ_NONE; currentBuzzStep=BUZZ_IDLE;
+  digitalWrite(ALERT_PIN,LOW);
 
-  SensorData neckData, backData;
-  bool neckReadOK = mpuReadRaw(NECK_MPU_ADDRESS, neckData);
-  bool backReadOK = mpuReadRaw(BACK_MPU_ADDRESS, backData);
-
-  if (!neckReadOK || !backReadOK)
-  {
+  SensorData neckData{}, backData{};
+  bool neckReadOK=true;
+#if SPINEALIGN_DUAL_IMU
+  neckReadOK=mpuReadRaw(NECK_MPU_ADDRESS,neckData);
+#endif
+  const uint8_t backAddress=SPINEALIGN_DUAL_IMU ? BACK_MPU_ADDRESS : NECK_MPU_ADDRESS;
+  const bool backReadOK=mpuReadRaw(backAddress,backData);
+  if(!neckReadOK || !backReadOK) {
     Serial.println("CALIBRATION FAILED"); sendBleLine("CALIBRATION FAILED");
-    if(displayAvailable) { display.clearDisplay(); display.setTextSize(1); display.setCursor(0,0); display.println("Calibration failed"); display.println("Check sensors"); display.display(); }
+    if(displayAvailable) {
+      display.clearDisplay(); display.setTextSize(1); display.setCursor(0,0);
+      display.println("Calibration failed"); display.println("Check sensors"); display.display();
+    }
     return;
   }
 
-  const float neckInitialPitch = calculatePitchAngle(neckData);
-  const float neckInitialRoll = calculateRollAngle(neckData);
-  const float backInitialPitch = calculatePitchAngle(backData);
-  const float backInitialRoll = calculateRollAngle(backData);
-  neckPitchZero = neckInitialPitch; neckRollZero = neckInitialRoll;
-  backPitchZero = backInitialPitch; backRollZero = backInitialRoll;
+#if SPINEALIGN_DUAL_IMU
+  const float neckInitialPitch=calculatePitchAngle(neckData);
+  const float neckInitialRoll=calculateRollAngle(neckData);
+  neckPitchZero=neckInitialPitch; neckRollZero=neckInitialRoll;
   neckPitchFilter.reset(neckInitialPitch); neckRollFilter.reset(neckInitialRoll);
+#else
+  neckPitchZero=neckRollZero=0.0f;
+  neckPitchFilter.reset(0.0f); neckRollFilter.reset(0.0f);
+  neckPitch=neckRoll=neckAngle=0.0f;
+#endif
+  const float backInitialPitch=calculatePitchAngle(backData);
+  const float backInitialRoll=calculateRollAngle(backData);
+  backPitchZero=backInitialPitch; backRollZero=backInitialRoll;
   backPitchFilter.reset(backInitialPitch); backRollFilter.reset(backInitialRoll);
-  neckPitch = neckRoll = backPitch = backRoll = 0.0f;
-  neckAngle = backAngle = 0.0f;
-  badPosture = false;
-  alertActive = false;
-  badPostureStartTime = 0;
-  lastAlertTime = 0;
-  isCalibrated = true;
-  currentBuzz = BUZZ_NONE;
-  currentBuzzStep = BUZZ_IDLE;
-  digitalWrite(ALERT_PIN, LOW);
-
+#if SPINEALIGN_DUAL_IMU
+  neckPitch=neckRoll=neckAngle=0.0f;
+#endif
+  backPitch=backRoll=backAngle=0.0f;
+  badPosture=false; alertActive=false; badPostureStartTime=0; lastAlertTime=0;
+  isCalibrated=true; currentBuzz=BUZZ_NONE; currentBuzzStep=BUZZ_IDLE;
+  digitalWrite(ALERT_PIN,LOW);
   Serial.println("CALIBRATED"); sendBleLine("CALIBRATED");
-  if(displayAvailable) { display.clearDisplay(); display.setTextSize(1); display.setCursor(0,0); display.println("Calibration complete"); display.println("Posture reference set"); display.display(); }
-  delay(700);
+  if(displayAvailable) {
+    display.clearDisplay(); display.setTextSize(1); display.setCursor(0,0);
+    display.println("Calibration complete"); display.println("Posture reference set"); display.display();
+  }
+  delay(500);
 }
 
 void startAlert(BuzzType type)
@@ -490,77 +497,47 @@ void updateAlert()
 
 void updatePosture()
 {
-  if (!isCalibrated)
-    return;
-
-  if (!neckAvailable || !backAvailable)
-  {
-    if (badPosture || alertActive || currentBuzz != BUZZ_NONE)
+  if(!isCalibrated) return;
+  if(!backAvailable
+#if SPINEALIGN_DUAL_IMU
+      || !neckAvailable
+#endif
+  ) {
+    if(badPosture || alertActive || currentBuzz!=BUZZ_NONE)
       Serial.println("POSTURE MONITORING PAUSED - SENSOR ERROR");
-
-    badPosture = false;
-    alertActive = false;
-    badPostureStartTime = 0;
-    lastAlertTime = 0;
-    currentBuzz = BUZZ_NONE;
-    currentBuzzStep = BUZZ_IDLE;
-    digitalWrite(ALERT_PIN, LOW);
+    badPosture=false; alertActive=false; badPostureStartTime=0; lastAlertTime=0;
+    currentBuzz=BUZZ_NONE; currentBuzzStep=BUZZ_IDLE; digitalWrite(ALERT_PIN,LOW);
     return;
   }
-
-  float maximumDeviation = max(fabsf(neckAngle), fabsf(backAngle));
-  unsigned long currentTime = millis();
-
-  if (!badPosture)
-  {
-    if (maximumDeviation >= POSTURE_THRESHOLD_DEG)
-    {
-      badPosture = true;
-      alertActive = false;
-      badPostureStartTime = currentTime;
+  float maximumDeviation=fabsf(backAngle);
+#if SPINEALIGN_DUAL_IMU
+  maximumDeviation=max(maximumDeviation,fabsf(neckAngle));
+#endif
+  const unsigned long currentTime=millis();
+  if(!badPosture) {
+    if(maximumDeviation>=POSTURE_THRESHOLD_DEG) {
+      badPosture=true; alertActive=false; badPostureStartTime=currentTime;
     }
     return;
   }
-
-  if (!alertActive)
-  {
-    if (maximumDeviation < POSTURE_THRESHOLD_DEG)
-    {
-      badPosture = false;
-      badPostureStartTime = 0;
-      lastAlertTime = 0;
-      Serial.println("POSTURE RECOVERED BEFORE ALERT");
-      return;
+  if(!alertActive) {
+    if(maximumDeviation<POSTURE_THRESHOLD_DEG) {
+      badPosture=false; badPostureStartTime=0; lastAlertTime=0;
+      Serial.println("POSTURE RECOVERED BEFORE ALERT"); return;
     }
-
-    if (currentTime - badPostureStartTime >= BAD_POSTURE_HOLD_MS)
-    {
-      startAlert(BUZZ_DOUBLE);
-      alertActive = true;
-      lastAlertTime = currentTime;
+    if(currentTime-badPostureStartTime>=BAD_POSTURE_HOLD_MS) {
+      startAlert(BUZZ_DOUBLE); alertActive=true; lastAlertTime=currentTime;
       Serial.println("BAD POSTURE ALERT");
     }
     return;
   }
-
-  if (maximumDeviation < RECOVER_THRESHOLD_DEG)
-  {
-    badPosture = false;
-    alertActive = false;
-    badPostureStartTime = 0;
-    lastAlertTime = 0;
-    currentBuzz = BUZZ_NONE;
-    currentBuzzStep = BUZZ_IDLE;
-    digitalWrite(ALERT_PIN, LOW);
-    Serial.println("POSTURE RECOVERED");
-    return;
+  if(maximumDeviation<RECOVER_THRESHOLD_DEG) {
+    badPosture=false; alertActive=false; badPostureStartTime=0; lastAlertTime=0;
+    currentBuzz=BUZZ_NONE; currentBuzzStep=BUZZ_IDLE; digitalWrite(ALERT_PIN,LOW);
+    Serial.println("POSTURE RECOVERED"); return;
   }
-
-  if (currentTime - lastAlertTime >= ALERT_REPEAT_MS)
-  {
-    startAlert(BUZZ_SINGLE);
-    lastAlertTime = currentTime;
-    Serial.println("REPEATED POSTURE ALERT");
+  if(currentTime-lastAlertTime>=ALERT_REPEAT_MS) {
+    startAlert(BUZZ_SINGLE); lastAlertTime=currentTime; Serial.println("REPEATED POSTURE ALERT");
   }
 }
 
@@ -626,7 +603,11 @@ void updateOLED()
   display.println("SpineAlign Lite");
   display.setCursor(0, 13);
   display.print("Neck:");
+#if SPINEALIGN_DUAL_IMU
   printFixedAngle(neckAngle);
+#else
+  display.print(" N/A");
+#endif
   display.println((char)247);
   display.setCursor(0, 25);
   display.print("Back:");
@@ -663,6 +644,7 @@ String buildTelemetryLine() {
   line += ",NR:" + String(neckRoll,1);
   line += ",BP:" + String(backPitch,1);
   line += ",BR:" + String(backRoll,1);
+  line += ",MODE:" + String(SPINEALIGN_DUAL_IMU ? 2 : 1);
   line += ",ALERT:" + String(badPosture?1:0);
   line += ",CAL:" + String(isCalibrated?1:0);
   line += ",NS:" + String(neckAvailable?1:0);
@@ -709,9 +691,16 @@ void setup() {
     display.clearDisplay(); display.setTextColor(SSD1306_WHITE); display.setTextSize(1);
     display.setCursor(0,0); display.println("SpineAlign Lite"); display.println("Starting..."); display.display();
   } else Serial.println("OLED not detected; continuing without display");
-  neckAvailable=mpuInit(NECK_MPU_ADDRESS); backAvailable=mpuInit(BACK_MPU_ADDRESS);
-  Serial.printf("Neck IMU 0x68: %s\\n",neckAvailable?"OK":"FAILED");
-  Serial.printf("Back IMU 0x69: %s\\n",backAvailable?"OK":"FAILED");
+#if SPINEALIGN_DUAL_IMU
+  neckAvailable=mpuInit(NECK_MPU_ADDRESS);
+  backAvailable=mpuInit(BACK_MPU_ADDRESS);
+  Serial.printf("Dual IMU mode; neck 0x68: %s\\n",neckAvailable?"OK":"FAILED");
+  Serial.printf("Dual IMU mode; back 0x69: %s\\n",backAvailable?"OK":"FAILED");
+#else
+  neckAvailable=false;
+  backAvailable=mpuInit(NECK_MPU_ADDRESS);
+  Serial.printf("Single IMU mode; back sensor on 0x68: %s\\n",backAvailable?"OK":"FAILED");
+#endif
   batteryAdcAvailable=batteryADC.begin(ADS1115_ADDRESS,&Wire);
   if(batteryAdcAvailable) {
     batteryADC.setGain(GAIN_ONE); batteryADC.setDataRate(RATE_ADS1115_860SPS);
@@ -734,11 +723,18 @@ void loop() {
   if(currentTime-lastSensorTime>=SENSOR_INTERVAL_MS) {
     float dt=(currentTime-lastSensorTime)/1000.0f; lastSensorTime=currentTime;
     if(dt<=0.0f || dt>0.5f) dt=0.01f;
+#if SPINEALIGN_DUAL_IMU
     updateSensor(NECK_MPU_ADDRESS,neckPitchFilter,neckRollFilter,neckPitch,neckRoll,
                  neckPitchZero,neckRollZero,neckAvailable,dt);
     updateSensor(BACK_MPU_ADDRESS,backPitchFilter,backRollFilter,backPitch,backRoll,
                  backPitchZero,backRollZero,backAvailable,dt);
     neckAngle=sqrtf((neckPitch*neckPitch)+(neckRoll*neckRoll));
+#else
+    neckAvailable=false;
+    neckPitch=neckRoll=neckAngle=0.0f;
+    updateSensor(NECK_MPU_ADDRESS,backPitchFilter,backRollFilter,backPitch,backRoll,
+                 backPitchZero,backRollZero,backAvailable,dt);
+#endif
     backAngle=sqrtf((backPitch*backPitch)+(backRoll*backRoll));
     updatePosture();
   }

@@ -278,10 +278,9 @@
 
   function updateFromLine(line) {
     // N/B remain scalar overall tilt; NP/NR/BP/BR are sensor pitch/roll.
-    const readField = (key) => {
-      const match = line.match(new RegExp('(?:^|[,\\s])' + key + '\\s*:\\s*(-?\\d+(?:\\.\\d+)?)', 'i'));
-      return match ? Number(match[1]) : null;
-    };
+    const parsed = window.SpineAlignTelemetry && window.SpineAlignTelemetry.parseLine(line);
+    if (!parsed) return;
+    const readField = (key) => Object.prototype.hasOwnProperty.call(parsed, key) ? parsed[key] : null;
     const neck = readField('N'), back = readField('B');
     if (neck === null || back === null || !Number.isFinite(neck) || !Number.isFinite(back)) return;
     state.neck = neck; state.back = back;

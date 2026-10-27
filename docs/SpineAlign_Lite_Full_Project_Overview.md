@@ -1,49 +1,41 @@
 # SpineAlign Lite — Full Project Overview
 
-## Concept
+## Project objective
 
-SpineAlign Lite is a wearable posture-monitoring prototype designed to track posture at two body locations: the neck and mid/lower back. It compares measured angles against an individual upright baseline, waits for sustained deviation before the first alert, and provides discreet feedback. The intended physical device connects to an Android companion app over Bluetooth Classic SPP for calibration controls, profiles, and posture history.
+SpineAlign Lite is a student wearable posture-monitoring prototype. It compares sensor-derived tilt against an upright calibration reference, waits for sustained deviation before triggering an alert, and presents current readings and recent history in a browser dashboard. It is not a medical diagnostic device.
 
-## Planned physical build
+## Three distinct repository parts
 
-- ESP32-CAM module (camera unused; controller and intended Bluetooth link)
-- Two MPU6050 IMUs: neck at I²C address 0x68 and back at 0x69
-- TP4056 charging module
-- 3.7 V Li-ion/LiPo battery
-- Haptic vibration motor
-- Android companion app, intended to receive state and provide calibration/profile/history UI
+### 1. Wokwi simulation
 
-The firmware and real-device electrical design are prototypes and must be validated before hardware use.
+The root `SpineAlign.ino`, `diagram.json` and `wokwi.toml` represent an ESP32 DevKit simulation. It retains the two-IMU neck/back model, OLED, calibration button, resistor-protected status LED, and USB serial telemetry. This is the logic-validation/simulation path; its wiring is not the physical ESP32-CAM wiring.
 
-## Sensing and filtering
+### 2. Dashboard
 
-Each MPU6050 supplies accelerometer and gyroscope data over I²C. The firmware calculates an accelerometer angle and fuses it with gyroscope rate through a two-state Kalman filter that estimates angle and gyro bias. The neck and back signals use independent filters. Both angles are measured relative to a session calibration baseline.
+The browser dashboard provides demo readings, angle history, battery-status presentation and the 3D orientation view. The shared `telemetry-protocol.js` validates complete telemetry lines. `ble-serial-bridge.js` adapts BLE notifications into the same line stream; `?transport=usb` preserves the wired/Wokwi development path.
 
-## Posture and alert logic
+### 3. Physical AI-Thinker ESP32-CAM
 
-- Calibration sets the current neck/back angle as the upright reference.
-- A maximum absolute deviation of 15° starts the first-alert hold timer.
-- The deviation must remain at or above 15° continuously for 3 seconds to trigger the initial double LED pulse.
-- After the first alert, posture recovers only when both deviations are below 12°.
-- If poor posture continues, a single-pulse reminder repeats every 45 seconds.
-- If either sensor read fails, posture decisions pause and the current LED alert is canceled.
+The separate sketch in `firmware/SpineAlign_ESP32CAM/` carries the posture logic plus BLE GATT telemetry, calibration commands, Wi-Fi ArduinoOTA updates and ADS1115-based battery/charger monitoring.
 
-## Wokwi simulation build
+The default wearable profile uses **one MPU6050 at I²C address 0x68 mounted on the back**. Telemetry uses `MODE:1`; the dashboard hides neck measurements because a single sensor cannot measure neck motion independently. To build the two-IMU variant, set `SPINEALIGN_DUAL_IMU 1` in a private `config.h`; then use a second IMU at address 0x69 and `MODE:2` telemetry.
 
-The simulation uses an ESP32 DevKit-C V4, two MPU6050 sensors, an SSD1306 OLED, one red LED, and a calibration button. The OLED is included to make the demo self-explanatory. The LED replaces the planned physical haptic motor, and the button/serial command replaces app-issued calibration.
+## Main components
 
-The local firmware intentionally does not demonstrate Bluetooth, the Android app, battery charging, or a real vibration motor. Those are future hardware/app integration tasks; they should not be described as already implemented in this simulation.
+- AI-Thinker ESP32-CAM with 4 MB flash (verify exact board revision).
+- One MPU6050 by default; optional second MPU6050 for dual mode.
+- Optional SSD1306 OLED at I²C address 0x3C.
+- ADS1115 external ADC at 0x48 for battery voltage and charge-status signals.
+- TP4056 charging module and protected single-cell Li-ion/LiPo battery.
+- Suitable regulator/power path and transistor/MOSFET alert driver.
+- Web Bluetooth dashboard and Wi-Fi OTA for later firmware updates.
 
-## Demo flow
+## Power and charging measurement
 
-1. Start the simulation and verify both sensors initialize.
-2. Place both simulated sensors in the reference position.
-3. Press the calibration button or type `CALIBRATE` in the serial monitor.
-4. Tilt either sensor enough to exceed 15° and hold it for 3 seconds.
-5. Observe the LED alert and OLED `ALERT` state.
-6. Bring both readings below 12° to clear the alert state.
-7. Observe live neck/back angle telemetry in the serial monitor.
+Battery positive is read through a 100k/100k divider into ADS1115 A0. TP4056 CHRG is read separately on ADS1115 A1 with a 10k pull-up to 3V3. The readings share ground. ADS1115 sampling avoids relying on ESP32 ADC2 when Wi-Fi OTA is active.
 
-## Scope and limitations
+The displayed percentage is estimated from battery voltage, not a fuel gauge. TP4056 CHRG by itself cannot distinguish charger unplugged from charge complete. The TP4056 is a charger, not a boost converter or load-sharing regulator. Use a suitable regulated power path and protected cell.
 
-SpineAlign Lite is a course-project prototype, not a medical diagnostic device. Thresholds and sensor axes need physical validation; the simulation is not proof of real-world ergonomic accuracy or clinical efficacy. Calibration is session-based and is not saved across reboots.
+## Test status
+
+The software test suite covers telemetry parsing and repository integration assumptions. Physical testing is required to validate sensor axis signs, calibration, battery accuracy, charger signal, boot-strapping behavior, BLE/Wi-Fi coexistence and OTA recovery. The initial flash must be wired through FTDI; keep wired recovery available until OTA has passed.

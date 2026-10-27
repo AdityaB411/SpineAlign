@@ -1,44 +1,29 @@
 # SpineAlign Lite
 
-SpineAlign Lite is a dual-IMU posture-monitoring prototype. The firmware reads neck and back sensors, filters pitch/roll, compares deviation against a session calibration reference, and gives a local alert after sustained deviation. This repository includes the Wokwi ESP32 DevKit simulation and a browser dashboard with demo and USB-serial live modes.
+SpineAlign Lite is a dual-IMU posture-monitoring prototype. It reads neck and back IMUs, filters pitch/roll, compares deviations with a calibration reference, and provides local posture alerts. It is split into the Wokwi simulation, browser dashboard, and physical ESP32-CAM firmware.
 
-## Run the dashboard locally
+## Wokwi simulation
 
-From the repository root:
+The repository-root SpineAlign.ino, diagram.json, wokwi.toml and libraries.txt remain the simulation project. The root sketch is unchanged; default hardware is ESP32 DevKit with SDA 21, SCL 23, calibration button GPIO14 and alert LED GPIO25.
 
-```sh
-python3 -m http.server 8000
-```
+## Web dashboard
 
-Open `http://localhost:8000`. Demo mode works without hardware. Live USB serial requires a desktop Chromium-based browser supporting Web Serial over a secure context (localhost or HTTPS). Close Arduino Serial Monitor before connecting from the browser.
+Run from the repository root with: python3 -m http.server 8000. Open http://localhost:8000. Demo mode works without hardware. The dashboard defaults to BLE for the physical firmware and uses Web Serial with ?transport=usb. Web Bluetooth needs HTTPS or localhost and compatible Chrome/Edge desktop or Android; Web Serial needs desktop Chromium.
 
-## Firmware profiles
+ble-serial-bridge.js loads before app.js, adapts GATT notifications to the same newline-delimited parser, and preserves the USB simulation path.
 
-- **Wokwi / ESP32 DevKit:** default `SPINEALIGN_TARGET_ESP32_CAM=0`; I²C SDA 21, SCL 23; calibration button GPIO14; alert LED GPIO25.
-- **Physical AI-Thinker ESP32-CAM:** set `SPINEALIGN_TARGET_ESP32_CAM=1`; I²C SDA 14, SCL 15; alert-driver input GPIO2; battery ADC GPIO13; TP4056 CHRG GPIO33; calibration via USB serial `CALIBRATE`.
+## Physical AI-Thinker ESP32-CAM firmware
 
-GPIO13 is used for the battery divider (ADC2), and GPIO33 is used for the active-low, open-drain TP4056 CHRG status input. ADC2 reads require Wi-Fi to stay off; the intended physical profile is Bluetooth-only. GPIO13/14/15 share pins with the ESP32-CAM microSD interface, which must remain unused. GPIO33 is not exposed on every board revision and may be connected to an onboard indicator; confirm the exact schematic/pad and isolate any LED load before attaching CHRG. GPIO2 and GPIO15 can affect boot, so verify the exact board revision and boot behavior before soldering. Use the recommended divider, a suitable regulator, and a protected cell. Never connect a Li-ion cell directly to a GPIO or 3V3 input; never drive a haptic motor directly from a GPIO.
+Open firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino. Do not replace the root simulation sketch. This separate firmware reuses the posture logic and adds BLE notifications, BLE CALIBRATE writes, Wi-Fi ArduinoOTA and ADS1115 battery/charger sensing. Install Adafruit GFX Library, Adafruit SSD1306 and Adafruit ADS1X15.
 
-## Live serial protocol
+Copy firmware/SpineAlign_ESP32CAM/config.example.h to config.h and set a 2.4 GHz Wi-Fi SSID/password plus a unique OTA password of at least 12 characters. config.h is ignored by Git; example credentials intentionally disable Wi-Fi/OTA. The custom partitions.csv targets 4 MB flash with two OTA slots; confirm actual board flash size. First flash is wired via FTDI/USB-UART.
 
-Firmware streams at 115200 baud, for example:
+## Hardware notes
 
-```text
-N:5.2,B:8.7,NP:4.1,NR:1.0,BP:7.2,BR:-2.1,ALERT:0,CAL:1,NS:1,BS:1,BAT:3.87,PCT:78,CHG:0,FULL:0
-```
+Physical firmware expects two IMUs at addresses 0x68 and 0x69 (AD0 low on neck, high on back), optional SSD1306 OLED, and ADS1115 at 0x48. I²C uses GPIO14/15, so microSD must remain unused. GPIO2 is boot-sensitive and should drive a properly designed transistor/MOSFET circuit only; never drive a motor directly from a GPIO.
 
-- `N` / `B`: combined pitch/roll deviation magnitude for neck/back.
-- `NP` / `NR`, `BP` / `BR`: pitch/roll values used by the 3D view.
-- `ALERT`: firmware posture-threshold state; `CAL`: calibration flag.
-- `NS` / `BS`: latest sensor-read validity flags. A zero indicates that the latest raw sensor read failed.
-- `BAT` / `PCT`: approximate single-cell voltage and voltage-derived percentage; `CHG` / `FULL`: TP4056 CHRG state and a near-full-voltage estimate. `FULL:1` does not prove that the charger is connected or charging has completed.
+Battery voltage goes through a 100k/100k divider to ADS1115 A0. TP4056 CHRG goes to ADS1115 A1 with a 10k pull-up to 3V3. Use common ground, a protected cell and suitable regulator/power path. TP4056 is a charger, not a boost converter/load-sharing regulator. Percentage and FULL are voltage/state estimates, not proof of charge completion.
 
-The dashboard sends `CALIBRATE\n` over USB. Firmware responds with `CALIBRATED` or `CALIBRATION FAILED`, and the dashboard displays the result.
+## Telemetry and validation
 
-## CI, deployment, and limitations
-
-GitHub Actions validates dashboard JavaScript and compiles both the Wokwi DevKit profile and physical ESP32-CAM profile. These checks do not validate sensor axis orientation, boot-strapping behavior, battery voltage accuracy, charging, or haptic electronics on physical hardware.
-
-Enable GitHub Pages once under **Settings → Pages → Build and deployment → Source → GitHub Actions**. After it is enabled, the deployment workflow publishes the dashboard when web assets change.
-
-The 3D view samples a CC0 human mesh and animates approximate torso/head rotations from the two IMUs. Check the pose and axis signs against the final sensor mounts. This is a student prototype, not a medical diagnostic device. The Android companion app/Bluetooth link and full physical wearable integration are not implemented in this repository yet.
+Telemetry fields are N, B, NP, NR, BP, BR, ALERT, CAL, NS, BS, BAT, PCT, CHG and FULL. GitHub Actions syntax-checks the dashboard/bridge and compiles the unchanged Wokwi sketch plus dedicated ESP32-CAM sketch. These checks do not replace physical testing of sensors, battery readings, charging, boot stability, BLE/Wi-Fi coexistence and OTA recovery. Retain FTDI recovery until OTA is verified. SpineAlign is a student prototype, not a medical diagnostic device.

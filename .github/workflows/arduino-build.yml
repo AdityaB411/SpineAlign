@@ -25,6 +25,7 @@ jobs:
       - name: Validate dashboard JavaScript
         run: |
           node --check app.js
+          node --check ble-serial-bridge.js
           node --input-type=module --check < orientation3d.js
 
       - name: Install Arduino CLI
@@ -43,9 +44,10 @@ jobs:
         run: |
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit SSD1306"
+          arduino-cli lib install "Adafruit ADS1X15"
 
       - name: Compile Wokwi / ESP32 DevKit profile
         run: arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir build .
 
-      - name: Compile physical AI-Thinker ESP32-CAM profile
-        run: arduino-cli compile --fqbn esp32:esp32:esp32cam --build-property "compiler.cpp.extra_flags=-DSPINEALIGN_TARGET_ESP32_CAM=1" --output-dir build-cam .
+      - name: Compile physical AI-Thinker ESP32-CAM BLE/OTA firmware
+        run: arduino-cli compile --fqbn esp32:esp32:esp32cam --output-dir build-cam firmware/SpineAlign_ESP32CAM

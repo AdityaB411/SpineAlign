@@ -379,6 +379,7 @@
 
   async function readSerialLoop(port) {
     let buffer = '';
+    const decoder = new TextDecoder();
     try {
       while (port.readable && state.keepReading) {
         state.reader = port.readable.getReader();
@@ -387,7 +388,7 @@
             const { value, done } = await state.reader.read();
             if (done) break;
             if (!value) continue;
-            buffer += value;
+            buffer += (typeof value === 'string' ? value : decoder.decode(value, { stream: true }));
             const lines = buffer.split(/\r?\n/);
             buffer = lines.pop() || '';
             for (const line of lines) handleSerialLine(line.trim());

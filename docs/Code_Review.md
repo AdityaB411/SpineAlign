@@ -1,32 +1,25 @@
-# SpineAlign Lite — Code Review and Fix Log
+# SpineAlign Lite — code review and fix log
 
-## Automated checks
+## Layout
 
-- GitHub Actions compiles the Wokwi/ESP32 DevKit profile and the physical AI-Thinker ESP32-CAM profile.
-- JavaScript syntax checks run for `app.js` and the ES module `orientation3d.js`.
-- These builds do not replace physical sensor, battery, charging, boot, or haptic-output validation.
+- Root SpineAlign.ino, diagram.json and wokwi.toml: unchanged Wokwi simulation.
+- Dashboard files: index.html, styles.css, app.js, orientation3d.js and ble-serial-bridge.js.
+- Physical sketch: firmware/SpineAlign_ESP32CAM/ with BLE, Wi-Fi OTA, ADS1115 battery and charging telemetry.
 
-## Issues fixed in this revision
+## Important fixes
 
-1. **Battery pin mismatch:** firmware and documentation agree on GPIO13 for the battery divider (ADC2, Wi-Fi disabled) and GPIO33 for TP4056 CHRG on the selected ESP32-CAM profile.
-2. **Sensor failure visibility:** serial telemetry now includes `NS` and `BS` flags. The dashboard reports sensor faults instead of treating retained previous angles as healthy current data.
-3. **Stale serial stream:** the dashboard marks live data as stale after 2.5 seconds without valid telemetry and updates connection/status UI.
-4. **3D preview-to-live handoff:** entering live mode clears the manual preview lock, allowing real orientation readings to drive the torso and head.
-5. **Calibration feedback:** the dashboard handles firmware `CALIBRATED` and `CALIBRATION FAILED` messages and indicates when calibration is needed.
-6. **Firmware I²C write errors:** MPU initialization stops if register writes fail and rechecks sensor identity after configuration.
-7. **Battery/charger wording:** the UI describes `FULL` as a near-full-voltage estimate, not confirmed charge completion; missing charger-state fields are not presented as definitive “not charging.”
-8. **Workflow permissions:** Pages workflow no longer tries to enable or create a Pages site using the workflow token. Enable Pages once in repository Settings → Pages → GitHub Actions.
-9. **CI coverage:** the build workflow compiles both board profiles.
-10. **Circuit protection:** the Wokwi diagram includes a 220 Ω resistor in series with the status LED.
-11. **Asset stability and styling:** external model asset is pinned to a source commit, and 3D point colors match the muted dashboard palette.
-12. **Documentation:** removed duplicate README sections and corrected battery/charger pin information.
+1. Corrected native Web Serial byte decoding before line parsing.
+2. Integrated the BLE bridge ahead of app.js and retained ?transport=usb for the simulation.
+3. Added a separate physical firmware sketch without rewriting the simulation source.
+4. Moved battery/charger sensing to ADS1115 A0/A1 to avoid ADC2/Wi-Fi incompatibility.
+5. Added 4 MB OTA partition table with two OTA app slots.
+6. Prevented placeholder credentials from enabling Wi-Fi/OTA; required a unique 12+ character OTA password.
+7. Enabled BLE bonding and encrypted characteristic access.
+8. Updated deployment to include the bridge and CI to compile the physical sketch with ADS1115.
+9. Removed contradictory battery wiring directions and documented GPIO boot/power risks.
 
-## Remaining physical verification
+## Physical verification still required
 
-- Confirm the exact ESP32-CAM board revision, boot-strapping behavior for GPIO2/GPIO15, GPIO33 pad access, and isolation from any onboard indicator LED.
-- Confirm IMU register compatibility, axis directions, and mounting orientation.
-- Measure the divider against a multimeter and calibrate battery percentage for the actual cell/load.
-- Confirm TP4056 CHRG wiring and pull-up implementation.
-- Verify the transistor/MOSFET driver and protection for the haptic motor.
-- Browser-test serial connect/disconnect/calibration on desktop Chromium and confirm GitHub Pages after enabling it.
-- The Android app/Bluetooth link and full physical wearable integration remain out of scope for this repository.
+CI cannot validate sensor axes, power integrity, battery calibration, charging signals, RF coexistence, boot straps or OTA recovery. The physical sketch expects two IMUs at 0x68 and 0x69; if the intended wearable uses one sensor, an explicit single-sensor mode is required rather than accepting a missing sensor. Retain FTDI recovery until OTA succeeds physically.
+
+SpineAlign is a student prototype, not a medical diagnostic device.

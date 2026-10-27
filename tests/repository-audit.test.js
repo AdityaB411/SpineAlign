@@ -35,7 +35,7 @@ test('native USB byte decoding and BLE adapter both preserve text chunks', () =>
 test('firmware exposes telemetry, calibration, BLE security, OTA and separated ADC channels', () => {
   const fw = read('firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino');
   for (const text of ['BLEService','BLECharacteristic::PROPERTY_NOTIFY','CALIBRATE','ArduinoOTA.handle()',
-    'ESP_LE_AUTH_REQ_SC_BOND','BATTERY_ADC_CHANNEL=0','CHARGER_ADC_CHANNEL=1','NS:', 'BS:', 'CHG:'])
+    'ESP_LE_AUTH_REQ_SC_BOND','BATTERY_ADC_CHANNEL=0','CHARGER_ADC_CHANNEL=1','RATE_ADS1115_860SPS','NS:', 'BS:', 'CHG:'])
     assert.ok(fw.includes(text), 'missing firmware element: ' + text);
 });
 

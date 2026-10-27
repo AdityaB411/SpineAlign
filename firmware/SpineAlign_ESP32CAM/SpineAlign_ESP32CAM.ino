@@ -147,7 +147,7 @@ static const char *BLE_DEVICE_NAME="SpineAlign-ESP32CAM";
 static const char *BLE_SERVICE_UUID="67b7a001-9b7c-4eb7-a1a8-6b7f51a0a101";
 static const char *BLE_CHARACTERISTIC_UUID="67b7a002-9b7c-4eb7-a1a8-6b7f51a0a101";
 static const size_t BLE_CHUNK_BYTES=20, BLE_QUEUE_CAPACITY=4;
-static const uint32_t BLE_CHUNK_INTERVAL_MS=3;
+static const uint32_t BLE_CHUNK_INTERVAL_MS=10;
 BLEServer *bleServer=nullptr;
 BLECharacteristic *bleTelemetryCharacteristic=nullptr;
 volatile bool bleClientConnected=false, calibrationRequested=false;
@@ -362,7 +362,7 @@ void updateBatteryTelemetry() {
   }
   const unsigned long now=millis(); if(now-lastBatteryRead<1000) return; lastBatteryRead=now;
   int32_t sum=0;
-  for(int i=0;i<8;++i) { sum+=batteryADC.readADC_SingleEnded(BATTERY_ADC_CHANNEL); delay(2); }
+  for(int i=0;i<4;++i) sum+=batteryADC.readADC_SingleEnded(BATTERY_ADC_CHANNEL);
   const float halfCellVoltage=batteryADC.computeVolts((int16_t)(sum/8));
   batteryVoltage=halfCellVoltage*BATTERY_VOLTAGE_DIVIDER_RATIO;
   batteryTelemetryAvailable=batteryVoltage>=2.5f && batteryVoltage<=4.5f;
@@ -714,7 +714,7 @@ void setup() {
   Serial.printf("Back IMU 0x69: %s\\n",backAvailable?"OK":"FAILED");
   batteryAdcAvailable=batteryADC.begin(ADS1115_ADDRESS,&Wire);
   if(batteryAdcAvailable) {
-    batteryADC.setGain(GAIN_ONE); batteryADC.setDataRate(RATE_ADS1115_128SPS);
+    batteryADC.setGain(GAIN_ONE); batteryADC.setDataRate(RATE_ADS1115_860SPS);
     Serial.println("ADS1115 battery/charger monitor: OK");
   } else Serial.println("ADS1115 not detected; battery telemetry unavailable");
   startBle();

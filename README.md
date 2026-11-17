@@ -1,41 +1,86 @@
-# SpineAlign Lite
+# SpineAlign
 
-SpineAlign Lite is a posture-monitoring prototype split into Wokwi simulation, browser dashboard, and physical ESP32-CAM firmware.
+SpineAlign is a wearable posture-monitoring system designed for the **ESP32-WROOM** module with Bluetooth Low Energy (BLE), coupled with a real-time browser dashboard featuring 3-axis bioluminescent particle human skeleton kinematics (bending and sideways twisting), Kalman-filtered angle tracking, and automated slouch alert feedback.
 
-## Structure
+---
 
-- `SpineAlign.ino`, `diagram.json`, `wokwi.toml`: unchanged Wokwi ESP32 DevKit simulation (two IMUs).
-- `index.html`, `styles.css`, `app.js`, `orientation3d.js`: browser dashboard and visualization.
-- `ble-serial-bridge.js`, `telemetry-protocol.js`: BLE adapter and strict shared telemetry parser.
-- `firmware/SpineAlign_ESP32CAM/`: physical firmware, PlatformIO configuration, OTA partitions and credential template.
-- `tests/`: parser scenario tests and repository integration checks.
-- `docs/`: setup, hardware and scenario test plan.
+## Architecture & Directory Structure
 
-## Dashboard
+- [SpineAlign.ino](file:///e:/SpineAlign/SpineAlign.ino): Direct-flash ESP32-WROOM / ESP32 DevKit Bluetooth (BLE) sketch for Arduino IDE.
+- `firmware/SpineAlign_ESP32WROOM/`: Dedicated ESP32-WROOM firmware package with PlatformIO configuration (`board = esp32dev`).
+- `firmware/SpineAlign_NodeMCU/`: Legacy NodeMCU ESP8266 Wi-Fi firmware with WebSocket streaming.
+- `firmware/SpineAlign_ESP32CAM/`: Legacy ESP32-CAM wireless firmware with custom OTA partition tables.
+- `index.html`, `styles.css`, `app.js`, `orientation3d.js`: Dashboard with 3D human particle skeleton, dual-joint kinematics, and multi-transport selector.
+- `ble-serial-bridge.js`, `telemetry-protocol.js`: Web Bluetooth bridge and strict shared telemetry parser.
+- `tests/`: Automated unit and integration test suite (`npm test`).
+- `docs/`: Setup guide, research paper overview, hardware pinouts, and system design specifications.
 
-Run `python3 -m http.server 8000` and open `http://localhost:8000`. Demo mode works without hardware. The dashboard defaults to BLE; use `?transport=usb` for the existing USB/Wokwi workflow. Web Bluetooth requires HTTPS or localhost and compatible Chrome/Edge.
+---
 
-## Software tests
+## ESP32-WROOM (Bluetooth Low Energy — Primary)
 
-With Node.js 20+ installed and no additional npm dependencies:
+The primary physical configuration targets the standard **ESP32-WROOM / ESP32 DevKit v1** board streaming real-time telemetry over Bluetooth Low Energy (BLE).
 
+### Standard ESP32-WROOM Pinout
+| Pin | ESP32-WROOM GPIO | Connected Peripheral |
+| :--- | :--- | :--- |
+| **SDA** | `GPIO 21` | MPU6050 I²C Data & SSD1306 OLED SDA |
+| **SCL** | `GPIO 22` | MPU6050 I²C Clock & SSD1306 OLED SCL |
+| **Alert** | `GPIO 18` | Posture buzzer / LED driver (active HIGH) |
+| **Calibrate** | `GPIO 0` | Onboard **BOOT** button (active LOW, momentary zero calibration) |
+| **Status LED** | `GPIO 2` | Onboard Blue LED (Blink = Adv, Solid ON = Connected, Flash = Calibrated) |
+| **Battery ADC** | `GPIO 34` | Optional battery voltage divider (ADC1 channel) |
+
+### Bluetooth Specifications
+- **Device Name**: `SpineAlign-ESP32`
+- **Service UUID**: `67b7a001-9b7c-4eb7-a1a8-6b7f51a0a101`
+- **Telemetry Characteristic UUID**: `67b7a002-9b7c-4eb7-a1a8-6b7f51a0a101`
+- **Capabilities**: Telemetry notification stream (10 Hz, 100 ms) & incoming calibration command (`CALIBRATE`).
+
+### Quick Flash Instructions (Arduino IDE)
+1. Open [SpineAlign.ino](file:///e:/SpineAlign/SpineAlign.ino) in Arduino IDE.
+2. Select Board: **ESP32 Dev Module** and choose your COM port.
+3. Install `Adafruit SSD1306` and `Adafruit GFX Library` via Library Manager.
+4. Click **Upload**.
+5. Open the dashboard at `http://localhost:8000`, select **Bluetooth (ESP32)**, and click **Connect Bluetooth**.
+
+---
+
+## NodeMCU ESP8266 (Wi-Fi WebSockets)
+
+Located in `firmware/SpineAlign_NodeMCU/`.
+
+### Pinout
+- **D2 (GPIO4)**: SDA (MPU6050 & SSD1306 OLED)
+- **D1 (GPIO5)**: SCL (MPU6050 & SSD1306 OLED)
+- **D5 (GPIO14)**: Alert Buzzer / LED
+- **D3 (GPIO0)**: Physical calibration button (active LOW)
+
+### Wi-Fi & WebSockets
+1. Copy `firmware/SpineAlign_NodeMCU/config.example.h` to `config.h` and configure 2.4 GHz Wi-Fi credentials.
+2. If unconfigured, the NodeMCU automatically starts an Access Point **`SpineAlign-NodeMCU`** at `192.168.4.1`.
+3. In the dashboard, switch to **Wi-Fi (NodeMCU)**, enter `spinealign.local` (or `192.168.4.1`), and click **Connect NodeMCU**.
+
+---
+
+## Dashboard & Visualizer
+
+Start local server:
+```sh
+python -m http.server 8000
+```
+Open `http://localhost:8000` in Google Chrome or Microsoft Edge.
+- **Hero 3D Visualizer**: Real-time bioluminescent particle human skeleton with independent torso (teal) and neck (amber) articulation.
+- **Transports Supported**: Web Bluetooth (ESP32-WROOM, default), WebSockets (NodeMCU ESP8266), and Web Serial (USB, 115200 baud).
+- **Demo Mode**: Built-in interactive demo sliders and slouch simulation available without hardware.
+
+---
+
+## Software Tests
+
+Run the complete automated test suite:
 ```sh
 npm test
 npm run check
 ```
-
-Tests cover valid and malformed telemetry, older frames, unavailable battery/charger status, duplicate/unknown fields, invalid flags, mode selection, partition bounds, dashboard script ordering, and repository firmware separation.
-
-## Physical ESP32-CAM
-
-Use `firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino`, not the root simulation sketch. Build with `pio run -d firmware/SpineAlign_ESP32CAM`. The PlatformIO project explicitly selects the custom 4 MB OTA partition table.
-
-Copy `config.example.h` to `config.h` and set 2.4 GHz Wi-Fi credentials plus a unique OTA password (12+ characters). The example values disable Wi-Fi/OTA and `config.h` is ignored by Git.
-
-### Sensor configuration
-
-The physical build defaults to **one MPU6050 at address 0x68 mounted on the back**. Its telemetry includes `MODE:1`; the dashboard hides the unmeasured neck panels rather than displaying fabricated data. To use two IMUs like Wokwi, set `SPINEALIGN_DUAL_IMU 1` in `config.h`; the second sensor is address 0x69 and telemetry uses `MODE:2`.
-
-The optional OLED is at 0x3C and ADS1115 at 0x48. Battery voltage goes via a 100k/100k divider to ADS1115 A0; TP4056 CHRG goes to A1 with a 10k pull-up to 3V3. GPIO14/15 are shared I²C, so microSD is unavailable. GPIO2 is boot-sensitive and only drives a properly designed transistor/MOSFET input after boot testing. A TP4056 is a charger, not a boost converter/regulator.
-
-Battery percentage and FULL are rough estimates. Compare measured voltage with a multimeter. Keep FTDI recovery available until a real OTA update is verified. Automated checks do not validate sensor alignment, electrical safety, charging, RF coexistence or physical OTA recovery. SpineAlign is a student prototype, not a medical diagnostic device.
+All 34 automated tests validate strict telemetry parsing, Bluetooth adapter chunking, 2nd-order critically damped 3D kinematics with 1:1 angular fidelity, NodeMCU/ESP32 pinouts, and credential protection.

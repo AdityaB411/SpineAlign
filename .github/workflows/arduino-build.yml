@@ -49,11 +49,14 @@ jobs:
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit ADS1X15"
 
-      - name: Compile Wokwi / ESP32 DevKit profile
+      - name: Compile ESP32-WROOM / ESP32 DevKit sketch
         run: arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir build .
 
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio
+
+      - name: Compile ESP32-WROOM PlatformIO firmware
+        run: pio run -d firmware/SpineAlign_ESP32WROOM
 
       - name: Compile physical AI-Thinker ESP32-CAM BLE/OTA firmware with its OTA partition table
         run: pio run -d firmware/SpineAlign_ESP32CAM

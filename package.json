@@ -2,7 +2,7 @@
   "name": "spinealign-lite",
   "private": true,
   "version": "1.0.0",
-  "description": "Wokwi posture-monitor prototype, BLE-capable dashboard and ESP32-CAM firmware",
+  "description": "ESP32-WROOM posture monitor with Bluetooth Low Energy (BLE) and 3D orientation dashboard",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "check": "node --check app.js && node --check ble-serial-bridge.js && node --check telemetry-protocol.js && node --input-type=module --check < orientation3d.js"

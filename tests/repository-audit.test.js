@@ -6,16 +6,17 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 
-test('keeps Wokwi simulation separate from physical wireless firmware', () => {
-  const sim = read('SpineAlign.ino');
-  const physical = read('firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino');
-  assert.match(sim, /#define SDA_PIN 21/);
-  assert.match(sim, /#define SCL_PIN 23/);
-  assert.doesNotMatch(sim, /#include <BLEDevice\.h>/);
-  assert.match(physical, /#include <BLEDevice\.h>/);
-  assert.match(physical, /ArduinoOTA\.handle\(\)/);
-  assert.match(physical, /Adafruit_ADS1X15\.h/);
-  assert.doesNotMatch(physical, /analogReadMilliVolts|analogRead\(BATTERY_ADC_PIN\)/);
+test('ESP32-WROOM firmware in root and physical wireless firmware support BLE and standard pinout', () => {
+  const rootFw = read('SpineAlign.ino');
+  const physicalCam = read('firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino');
+  assert.match(rootFw, /#define SDA_PIN 21/);
+  assert.match(rootFw, /#define SCL_PIN 22/);
+  assert.match(rootFw, /#include <BLEDevice\.h>/);
+  assert.match(rootFw, /67b7a001-9b7c-4eb7-a1a8-6b7f51a0a101/);
+  assert.match(physicalCam, /#include <BLEDevice\.h>/);
+  assert.match(physicalCam, /ArduinoOTA\.handle\(\)/);
+  assert.match(physicalCam, /Adafruit_ADS1X15\.h/);
+  assert.doesNotMatch(physicalCam, /analogReadMilliVolts|analogRead\(BATTERY_ADC_PIN\)/);
 });
 
 test('dashboard script order loads transport and parser before application', () => {

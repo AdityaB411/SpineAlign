@@ -1,7 +1,7 @@
-/* Web Bluetooth transport for SpineAlign. Loaded before app.js. ?transport=usb uses native Web Serial. */
+/* Web Bluetooth transport for SpineAlign. Loaded before app.js. ?transport=usb uses native Web Serial. ?transport=wifi uses WebSockets. */
 (() => {
   'use strict';
-  if(new URLSearchParams(location.search).get('transport')==='usb') return;
+  const transportParam = new URLSearchParams(location.search).get('transport');
   const SERVICE_UUID='67b7a001-9b7c-4eb7-a1a8-6b7f51a0a101';
   const CHARACTERISTIC_UUID='67b7a002-9b7c-4eb7-a1a8-6b7f51a0a101';
   const encoder=new TextEncoder(), listeners=new Map();
@@ -43,13 +43,16 @@
       return port;
     }catch(error){try{if(device?.gatt?.connected)device.gatt.disconnect();}catch(_){}throw error;}
   }
-  const shim={
-    async requestPort(){return requestBleDevice();},
-    addEventListener(type,cb){if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type).add(cb);},
-    removeEventListener(type,cb){listeners.get(type)?.delete(cb);}
-  };
-  try{Object.defineProperty(navigator,'serial',{configurable:true,value:shim});}
-  catch(error){console.error('Could not install SpineAlign BLE bridge:',error);}
+  window.SpineAlignBle = { requestBleDevice };
+  if(transportParam !== 'usb' && transportParam !== 'wifi') {
+    const shim={
+      async requestPort(){return requestBleDevice();},
+      addEventListener(type,cb){if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type).add(cb);},
+      removeEventListener(type,cb){listeners.get(type)?.delete(cb);}
+    };
+    try{Object.defineProperty(navigator,'serial',{configurable:true,value:shim});}
+    catch(error){console.error('Could not install SpineAlign BLE bridge:',error);}
+  }
   const ids=['topConnectionText','connectionType','deviceStatusSubtitle','deviceNote'];
   function updateLabels(){
     if(!window.__SpineAlignBleConnected)return;

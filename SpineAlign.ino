@@ -84,6 +84,74 @@ const unsigned long BAD_POSTURE_HOLD_MS = 3000;  // 3s sustained slouch before a
 const unsigned long ALERT_REPEAT_MS     = 45000; // 45s repeat reminder
 
 // ============================================================================
+// Core Data Types & Forward Declarations (must precede functions for Arduino IDE)
+// ============================================================================
+class KalmanFilter {
+private:
+  float angle, bias, rate;
+  float P[2][2];
+  float Q_angle, Q_bias, R_measure;
+
+public:
+  KalmanFilter() {
+    Q_angle = 0.001f;
+    Q_bias = 0.003f;
+    R_measure = 0.030f;
+    angle = bias = rate = 0.0f;
+    P[0][0] = P[0][1] = P[1][0] = P[1][1] = 0.0f;
+  }
+
+  float update(float measuredAngle, float measuredRate, float dt) {
+    rate = measuredRate - bias;
+    angle += dt * rate;
+    P[0][0] += dt * (dt * P[1][1] - P[0][1] - P[1][0] + Q_angle);
+    P[0][1] -= dt * P[1][1];
+    P[1][0] -= dt * P[1][1];
+    P[1][1] += Q_bias * dt;
+
+    float S = P[0][0] + R_measure;
+    float K[2];
+    K[0] = P[0][0] / S;
+    K[1] = P[1][0] / S;
+    float y = measuredAngle - angle;
+
+    angle += K[0] * y;
+    bias += K[1] * y;
+
+    float P00_temp = P[0][0];
+    float P01_temp = P[0][1];
+    P[0][0] -= K[0] * P00_temp;
+    P[0][1] -= K[0] * P01_temp;
+    P[1][0] -= K[1] * P00_temp;
+    P[1][1] -= K[1] * P01_temp;
+    return angle;
+  }
+
+  void reset(float initialAngle) {
+    angle = initialAngle;
+    bias = 0.0f;
+    P[0][0] = P[0][1] = P[1][0] = P[1][1] = 0.0f;
+  }
+};
+
+struct SensorData {
+  int16_t ax, ay, az;
+  int16_t gx, gy, gz;
+};
+
+enum BuzzType { BUZZ_NONE, BUZZ_DOUBLE, BUZZ_SINGLE };
+enum BuzzStep { BUZZ_IDLE, BUZZ_ON_1, BUZZ_OFF_1, BUZZ_ON_2 };
+
+void calibrateSensors();
+bool mpuReadRaw(uint8_t address, SensorData &data);
+float calculatePitchAngle(const SensorData &d);
+float calculateRollAngle(const SensorData &d);
+void updateSensor(uint8_t address, KalmanFilter &pitchFilter, KalmanFilter &rollFilter,
+                  float &outPitch, float &outRoll, float zeroPitch, float zeroRoll,
+                  bool &available, float dt);
+void startAlert(BuzzType type);
+
+// ============================================================================
 // Bluetooth Low Energy (BLE) Configuration
 // ============================================================================
 static const char *BLE_DEVICE_NAME         = "SpineAlign-ESP32";
@@ -101,8 +169,6 @@ volatile bool calibrationRequested = false;
 String bleTxQueue[BLE_QUEUE_CAPACITY];
 size_t bleTxHead = 0, bleTxCount = 0, bleTxOffset = 0;
 uint32_t lastBleChunkTime = 0;
-
-void calibrateSensors();
 
 class SpineAlignServerCallbacks final : public BLEServerCallbacks {
   void onConnect(BLEServer *) override {
@@ -193,61 +259,8 @@ void startBle() {
 }
 
 // ============================================================================
-// Kalman Filter
+// Global Filter & Posture State
 // ============================================================================
-class KalmanFilter {
-private:
-  float angle, bias, rate;
-  float P[2][2];
-  float Q_angle, Q_bias, R_measure;
-
-public:
-  KalmanFilter() {
-    Q_angle = 0.001f;
-    Q_bias = 0.003f;
-    R_measure = 0.030f;
-    angle = bias = rate = 0.0f;
-    P[0][0] = P[0][1] = P[1][0] = P[1][1] = 0.0f;
-  }
-
-  float update(float measuredAngle, float measuredRate, float dt) {
-    rate = measuredRate - bias;
-    angle += dt * rate;
-    P[0][0] += dt * (dt * P[1][1] - P[0][1] - P[1][0] + Q_angle);
-    P[0][1] -= dt * P[1][1];
-    P[1][0] -= dt * P[1][1];
-    P[1][1] += Q_bias * dt;
-
-    float S = P[0][0] + R_measure;
-    float K[2];
-    K[0] = P[0][0] / S;
-    K[1] = P[1][0] / S;
-    float y = measuredAngle - angle;
-
-    angle += K[0] * y;
-    bias += K[1] * y;
-
-    float P00_temp = P[0][0];
-    float P01_temp = P[0][1];
-    P[0][0] -= K[0] * P00_temp;
-    P[0][1] -= K[0] * P01_temp;
-    P[1][0] -= K[1] * P00_temp;
-    P[1][1] -= K[1] * P01_temp;
-    return angle;
-  }
-
-  void reset(float initialAngle) {
-    angle = initialAngle;
-    bias = 0.0f;
-    P[0][0] = P[0][1] = P[1][0] = P[1][1] = 0.0f;
-  }
-};
-
-struct SensorData {
-  int16_t ax, ay, az;
-  int16_t gx, gy, gz;
-};
-
 KalmanFilter neckPitchFilter, neckRollFilter, backPitchFilter, backRollFilter;
 float neckAngle = 0.0f, backAngle = 0.0f;
 float neckPitch = 0.0f, neckRoll = 0.0f, backPitch = 0.0f, backRoll = 0.0f;
@@ -259,8 +272,6 @@ bool badPosture = false, alertActive = false;
 unsigned long badPostureStartTime = 0, lastAlertTime = 0;
 unsigned long lastSensorTime = 0, lastOLEDTime = 0, lastSerialTime = 0, lastLedBlinkTime = 0;
 
-enum BuzzType { BUZZ_NONE, BUZZ_DOUBLE, BUZZ_SINGLE };
-enum BuzzStep { BUZZ_IDLE, BUZZ_ON_1, BUZZ_OFF_1, BUZZ_ON_2 };
 BuzzType currentBuzz = BUZZ_NONE;
 BuzzStep currentBuzzStep = BUZZ_IDLE;
 unsigned long buzzStepStartTime = 0;

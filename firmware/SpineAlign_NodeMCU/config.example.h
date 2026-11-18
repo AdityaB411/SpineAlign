@@ -7,11 +7,15 @@
 #define SPINEALIGN_WIFI_SSID "REPLACE_ME_SSID"
 #define SPINEALIGN_WIFI_PASSWORD "REPLACE_ME_PASSWORD"
 
-// Unique password for ArduinoOTA updates (12+ characters recommended)
-#define SPINEALIGN_OTA_PASSWORD "REPLACE_ME_12_CHAR_OTA_PASSWORD"
+// IMU Mode:
+// -1 = Auto-detect (Dual IMU if 0x68 + 0x69 respond, else Single IMU on 0x68)
+//  0 = Force Single IMU mounted on back (0x68, MODE:1)
+//  1 = Force Dual IMU: Neck on 0x68, Back on 0x69 (MODE:2)
+#define SPINEALIGN_DUAL_IMU -1
 
-// 0 = Single IMU mounted on back (0x68, MODE:1)
-// 1 = Dual IMU: Neck on 0x68, Back on 0x69 (MODE:2)
-#define SPINEALIGN_DUAL_IMU 0
+// Optional mounting axis overrides (only change if rotated 90 deg or mirrored):
+#define SPINEALIGN_SWAP_PITCH_ROLL 0
+#define SPINEALIGN_PITCH_SIGN 1
+#define SPINEALIGN_ROLL_SIGN 1
 
 #endif // SPINEALIGN_NODEMCU_CONFIG_H

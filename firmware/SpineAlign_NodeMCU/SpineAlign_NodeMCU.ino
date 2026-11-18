@@ -1,48 +1,86 @@
+// ============================================================================
+// SpineAlign — Low-Latency Wi-Fi-Only Posture Monitor for NodeMCU ESP8266
+// Transport: Wi-Fi WebSockets (port 81, 25 Hz) + Embedded HTTP Server (port 80)
+// IMU Modes: Auto-detect (-1), Single IMU (0, MODE:1), or Dual IMU (1, MODE:2)
+// ============================================================================
+// Required Arduino IDE setup:
+//   1. Board:   NodeMCU 1.0 (ESP-12E Module)  [esp8266 board package]
+//   2. Library: "WebSockets" by Markus Sattler (links2004)
+//
+// Wiring (NodeMCU -> Peripherals, separate boot-safe D pins for each MPU6050):
+//   MPU #1 (Neck, 0x68):  SDA -> D2 (GPIO4),  SCL -> D1 (GPIO5)
+//   MPU #2 (Back, 0x68):  SDA -> D6 (GPIO12), SCL -> D7 (GPIO13)
+//   Alert Buzzer / LED:   +   -> D5 (GPIO14), -   -> GND
+//   Calibrate Button:     D3 (GPIO0) -> GND (or onboard FLASH button)
+//   Battery Sense (Opt):  A0  -> Voltage divider from battery (+)
+//   Power (both MPUs):    VCC -> 3V3, GND -> GND, AD0 -> GND (or unconnected)
+//
+// Single IMU: Connect just 1 MPU6050 to EITHER D2/D1 or D6/D7 (auto-detected).
+// Dual IMU:   Connect Neck to D2/D1 and Back to D6/D7 (both at default 0x68).
+// ============================================================================
+
 #include <Wire.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <WebSocketsServer.h>
-#include <ArduinoOTA.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <math.h>
+#include <stdio.h>
 
 #if __has_include("config.h")
 #include "config.h"
 #endif
 
+// Leave blank or as placeholders to boot directly into AP mode ("SpineAlign-NodeMCU")
 #ifndef SPINEALIGN_WIFI_SSID
 #define SPINEALIGN_WIFI_SSID ""
 #endif
 #ifndef SPINEALIGN_WIFI_PASSWORD
 #define SPINEALIGN_WIFI_PASSWORD ""
 #endif
-#ifndef SPINEALIGN_OTA_PASSWORD
-#define SPINEALIGN_OTA_PASSWORD ""
-#endif
+
+// IMU Mode:
+//  -1 = Auto-detect on boot/calibration (Dual on D2/D1 + D6/D7 or 0x68+0x69, else Single)
+//   0 = Force Single IMU (Back on D6/D7 or D2/D1, MODE:1)
+//   1 = Force Dual IMU   (Neck on D2/D1, Back on D6/D7 or 0x69, MODE:2)
 #ifndef SPINEALIGN_DUAL_IMU
-#define SPINEALIGN_DUAL_IMU 0
+#define SPINEALIGN_DUAL_IMU -1
 #endif
 
-// NodeMCU ESP8266 Pin Definitions
-// D1 = GPIO5 (SCL), D2 = GPIO4 (SDA), D5 = GPIO14 (Alert Buzzer/LED)
+// Optional axis fine-tuning (if your MPU6050 is rotated 90 deg or mirrored):
+//   SPINEALIGN_SWAP_PITCH_ROLL: 0 = default, 1 = swap front/back and sideways
+//   SPINEALIGN_PITCH_SIGN:      1 or -1 (invert front/back direction)
+//   SPINEALIGN_ROLL_SIGN:       1 or -1 (invert left/right lean direction)
+#ifndef SPINEALIGN_SWAP_PITCH_ROLL
+#define SPINEALIGN_SWAP_PITCH_ROLL 0
+#endif
+#ifndef SPINEALIGN_PITCH_SIGN
+#define SPINEALIGN_PITCH_SIGN 1
+#endif
+#ifndef SPINEALIGN_ROLL_SIGN
+#define SPINEALIGN_ROLL_SIGN 1
+#endif
+
+// NodeMCU ESP8266 Pin Definitions (all I2C & Alert pins are 100% boot-safe)
+// MPU #1 (Neck / Primary): D2 = GPIO4 (SDA),  D1 = GPIO5 (SCL)
+// MPU #2 (Back):           D6 = GPIO12 (SDA), D7 = GPIO13 (SCL)
+// Alert Buzzer / LED:      D5 = GPIO14
 #define SDA_PIN 4
 #define SCL_PIN 5
+#define NECK_SDA_PIN SDA_PIN
+#define NECK_SCL_PIN SCL_PIN
+#define BACK_SDA_PIN 12
+#define BACK_SCL_PIN 13
 #define ALERT_PIN 14
 #define CALIBRATION_BUTTON_PIN 0 // D3 / FLASH button (active LOW)
 #define BATTERY_ADC_PIN A0
 #define BATTERY_MONITOR_ENABLED 1
 
-#define NECK_MPU_ADDRESS 0x68
-#define BACK_MPU_ADDRESS 0x69
-#define OLED_ADDRESS 0x3C
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-bool displayAvailable = false;
+// MPU6050 / MPU6500 / MPU9250 I2C Addresses & Registers
+#define MPU_DEFAULT_ADDRESS 0x68
+#define MPU_ALT_ADDRESS     0x69
+#define NECK_MPU_ADDRESS    MPU_DEFAULT_ADDRESS
+#define BACK_MPU_ADDRESS    MPU_ALT_ADDRESS
 
 #define MPU_PWR_MGMT_1   0x6B
 #define MPU_SMPLRT_DIV   0x19
@@ -52,16 +90,21 @@ bool displayAvailable = false;
 #define MPU_ACCEL_XOUT_H 0x3B
 #define MPU_WHO_AM_I     0x75
 
-const unsigned long SENSOR_INTERVAL_MS = 10;
-const unsigned long OLED_INTERVAL_MS = 250;
-const unsigned long SERIAL_INTERVAL_MS = 200;
-const float POSTURE_THRESHOLD_DEG = 15.0f;
-const float RECOVER_THRESHOLD_DEG = 12.0f;
-const unsigned long BAD_POSTURE_HOLD_MS = 3000;
-const unsigned long ALERT_REPEAT_MS = 45000;
+// Timing & Posture Thresholds
+const unsigned long SENSOR_INTERVAL_MS    = 5;      // 200 Hz Kalman filter
+const unsigned long TELEMETRY_INTERVAL_MS = 40;     // 25 Hz low-latency WebSocket stream
+const unsigned long SENSOR_REINIT_MS      = 1000;   // Non-blocking hot-recovery backoff
+const unsigned long WIFI_RETRY_MS         = 10000;  // Periodic STA reconnect check
+const float         POSTURE_THRESHOLD_DEG = 15.0f;
+const float         RECOVER_THRESHOLD_DEG = 12.0f;
+const unsigned long BAD_POSTURE_HOLD_MS   = 3000;
+const unsigned long ALERT_REPEAT_MS       = 45000;
+const unsigned long BUTTON_DEBOUNCE_MS    = 50;
+const float         RAD_TO_DEG_F          = 57.2957795f;
+const float         MIN_GRAVITY_LSB       = 8000.0f;  // ~0.49g at +/-2g (16384 LSB/g)
+const float         MAX_GRAVITY_LSB       = 25000.0f; // ~1.53g at +/-2g
 
-class KalmanFilter
-{
+class KalmanFilter {
 private:
   float angle, bias, rate;
   float P[2][2];
@@ -69,18 +112,16 @@ private:
 
 public:
   KalmanFilter()
-  {
-    Q_angle = 0.001f;
-    Q_bias = 0.003f;
-    R_measure = 0.03f;
-    angle = 0.0f;
-    bias = 0.0f;
-    rate = 0.0f;
+      : angle(0.0f), bias(0.0f), rate(0.0f),
+        Q_angle(0.001f), Q_bias(0.003f), R_measure(0.02f) {
     P[0][0] = P[0][1] = P[1][0] = P[1][1] = 0.0f;
   }
 
-  float update(float measuredAngle, float measuredRate, float dt)
-  {
+  float update(float measuredAngle, float measuredRate, float dt) {
+    if (!isfinite(measuredAngle) || !isfinite(measuredRate) || !isfinite(dt) || dt <= 0.0f) {
+      return isfinite(angle) ? angle : 0.0f;
+    }
+
     rate = measuredRate - bias;
     angle += dt * rate;
     P[0][0] += dt * (dt * P[1][1] - P[0][1] - P[1][0] + Q_angle);
@@ -89,62 +130,139 @@ public:
     P[1][1] += Q_bias * dt;
 
     float S = P[0][0] + R_measure;
-    float K[2];
-    K[0] = P[0][0] / S;
-    K[1] = P[1][0] / S;
+    if (!isfinite(S) || S <= 1e-6f) {
+      reset(measuredAngle);
+      return angle;
+    }
+
+    float K0 = P[0][0] / S;
+    float K1 = P[1][0] / S;
     float innovation = measuredAngle - angle;
 
-    angle += K[0] * innovation;
-    bias += K[1] * innovation;
+    angle += K0 * innovation;
+    bias += K1 * innovation;
 
-    float P00_temp = P[0][0];
-    float P01_temp = P[0][1];
-    P[0][0] -= K[0] * P00_temp;
-    P[0][1] -= K[0] * P01_temp;
-    P[1][0] -= K[1] * P00_temp;
-    P[1][1] -= K[1] * P01_temp;
+    float P00 = P[0][0];
+    float P01 = P[0][1];
+    P[0][0] -= K0 * P00;
+    P[0][1] -= K0 * P01;
+    P[1][0] -= K1 * P00;
+    P[1][1] -= K1 * P01;
+
+    if (!isfinite(angle) || !isfinite(bias)) {
+      reset(measuredAngle);
+    }
     return angle;
   }
 
-  void reset(float initialAngle)
-  {
-    angle = initialAngle;
+  void reset(float initialAngle) {
+    angle = isfinite(initialAngle) ? initialAngle : 0.0f;
     bias = 0.0f;
+    rate = 0.0f;
     P[0][0] = P[0][1] = P[1][0] = P[1][1] = 0.0f;
   }
 };
 
-struct SensorData
-{
+struct SensorData {
   int16_t ax, ay, az;
   int16_t gx, gy, gz;
 };
 
+// Automatically detected dominant gravity axis at upright neutral posture:
+//   MOUNT_FLAT_Z: PCB horizontal (Z up/down), X forward/back, Y left/right
+//   MOUNT_VERT_X: PCB vertical on back (X up/down), Z out of back, Y left/right
+//   MOUNT_VERT_Y: PCB vertical on back (Y up/down), Z out of back, X left/right
+enum MountAxis { MOUNT_FLAT_Z = 0, MOUNT_VERT_X = 1, MOUNT_VERT_Y = 2 };
+
+struct SensorCal {
+  MountAxis mountAxis = MOUNT_FLAT_Z;
+  float mountSign = 1.0f;
+  float gxBias = 0.0f;
+  float gyBias = 0.0f;
+  float gzBias = 0.0f;
+  float pitchZero = 0.0f;
+  float rollZero = 0.0f;
+};
+
+struct ImuBus {
+  uint8_t sda;
+  uint8_t scl;
+  uint8_t address;
+};
+
+// IMU & Posture State
 KalmanFilter neckPitchFilter, neckRollFilter, backPitchFilter, backRollFilter;
+SensorCal neckCal, backCal;
+ImuBus neckBus = { NECK_SDA_PIN, NECK_SCL_PIN, MPU_DEFAULT_ADDRESS };
+ImuBus backBus = { BACK_SDA_PIN, BACK_SCL_PIN, MPU_DEFAULT_ADDRESS };
+uint8_t activeI2cSda = 255;
+uint8_t activeI2cScl = 255;
+bool dualImuActive = false;
+
 float neckAngle = 0.0f, backAngle = 0.0f;
 float neckPitch = 0.0f, neckRoll = 0.0f, backPitch = 0.0f, backRoll = 0.0f;
-float neckPitchZero = 0.0f, neckRollZero = 0.0f, backPitchZero = 0.0f, backRollZero = 0.0f;
+
 float batteryVoltage = -1.0f;
 int batteryPercent = -1;
 bool batteryTelemetryAvailable = false;
 unsigned long lastBatteryRead = 0;
+
 bool neckAvailable = false, backAvailable = false;
+uint8_t neckFailCount = 0, backFailCount = 0;
+unsigned long lastNeckReinitAttempt = 0, lastBackReinitAttempt = 0;
 bool isCalibrated = false;
 bool badPosture = false, alertActive = false;
 unsigned long badPostureStartTime = 0, lastAlertTime = 0;
-unsigned long lastSensorTime = 0, lastOLEDTime = 0, lastSerialTime = 0;
-bool lastButtonState = HIGH;
-unsigned long lastButtonChangeTime = 0;
-const unsigned long BUTTON_DEBOUNCE_MS = 50;
+unsigned long lastSensorTime = 0, lastTelemetryTime = 0, lastWifiCheckTime = 0;
 
-// Wi-Fi, Web Server, WebSocket Server & OTA
+// Non-blocking debounced button state
+bool lastButtonRaw = HIGH;
+bool buttonPressedStable = false;
+unsigned long lastButtonChangeTime = 0;
+
+// Wi-Fi Servers
 ESP8266WebServer httpServer(80);
 WebSocketsServer webSocket = WebSocketsServer(81);
 bool apModeActive = false;
-bool otaStarted = false;
+bool networkStarted = false;
+bool mdnsStarted = false;
+bool calibrating = false;
 volatile bool calibrationRequested = false;
 
-void calibrateSensors();
+// Buzzer State Machine
+enum BuzzType { BUZZ_NONE, BUZZ_DOUBLE, BUZZ_SINGLE };
+enum BuzzStep { BUZZ_IDLE, BUZZ_ON_1, BUZZ_OFF_1, BUZZ_ON_2 };
+BuzzType currentBuzz = BUZZ_NONE;
+BuzzStep currentBuzzStep = BUZZ_IDLE;
+unsigned long buzzStepStartTime = 0;
+const unsigned long BUZZ_ON_TIME  = 150;
+const unsigned long BUZZ_OFF_TIME = 150;
+
+// Forward declarations (no default args for Arduino IDE prototype compatibility)
+void sendTelemetryToClient(uint8_t num);
+void broadcastTelemetry();
+
+// ---------------- Helpers ----------------
+
+static inline float safeFloat(float v, float fallback = 0.0f) {
+  return isfinite(v) ? v : fallback;
+}
+
+static inline float clampAngle(float v) {
+  if (!isfinite(v)) return 0.0f;
+  if (v > 180.0f) return 180.0f;
+  if (v < -180.0f) return -180.0f;
+  return v;
+}
+
+const char *mountAxisName(MountAxis axis) {
+  switch (axis) {
+    case MOUNT_VERT_X: return "VERT_X";
+    case MOUNT_VERT_Y: return "VERT_Y";
+    case MOUNT_FLAT_Z:
+    default:           return "FLAT_Z";
+  }
+}
 
 bool isPlaceholderCredential(const char *v) {
   return !v || !v[0] || strstr(v, "YOUR_") || strstr(v, "CHANGE_") ||
@@ -156,25 +274,45 @@ bool wifiCredentialsPresent() {
          !isPlaceholderCredential(SPINEALIGN_WIFI_PASSWORD);
 }
 
+// Keep WebSocket & HTTP responsive during brief init/calibration waits
+void serviceNetworkDelay(unsigned long ms) {
+  const unsigned long start = millis();
+  while (millis() - start < ms) {
+    if (networkStarted) {
+      webSocket.loop();
+      httpServer.handleClient();
+    }
+    delay(1);
+    yield();
+  }
+}
+
+void sendBroadcastLine(const String &line) {
+  webSocket.broadcastTXT(line.c_str(), line.length());
+}
+
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
   switch (type) {
-    case WStype_DISCONNECTED:
-      Serial.printf("[WebSocket] Client #%u disconnected\n", num);
-      break;
     case WStype_CONNECTED: {
-      IPAddress ip = webSocket.remoteIP(num);
-      Serial.printf("[WebSocket] Client #%u connected from %s\n", num, ip.toString().c_str());
-      webSocket.sendTXT(num, isCalibrated ? "STATUS:CALIBRATED" : "STATUS:UNCALIBRATED");
+      const char *statusMsg = isCalibrated ? "STATUS:CALIBRATED" : "STATUS:UNCALIBRATED";
+      webSocket.sendTXT(num, statusMsg);
+      sendTelemetryToClient(num);
       break;
     }
     case WStype_TEXT: {
-      String command = "";
+      if (!payload || length == 0 || length > 64) break;
+      String command;
+      command.reserve(length + 1);
       for (size_t i = 0; i < length; ++i) command += (char)payload[i];
       command.trim();
       command.toUpperCase();
-      Serial.printf("[WebSocket] Received command: %s\n", command.c_str());
       if (command == "CALIBRATE") {
-        calibrationRequested = true;
+        if (!calibrating) calibrationRequested = true;
+      } else if (command == "STATUS") {
+        const char *statusMsg = isCalibrated ? "STATUS:CALIBRATED" : "STATUS:UNCALIBRATED";
+        webSocket.sendTXT(num, statusMsg);
+      } else if (command == "PING") {
+        webSocket.sendTXT(num, "PONG");
       }
       break;
     }
@@ -183,124 +321,364 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
   }
 }
 
-void sendBroadcastLine(const String &line) {
-  webSocket.broadcastTXT(line);
+// ---------------- MPU6050 I2C (Dual-Bus Pin Switching + Recovery) ----------------
+
+void recoverI2CBus(uint8_t sda, uint8_t scl) {
+  // Release any slave holding SDA low with 9 SCL clock pulses + STOP condition
+  pinMode(sda, INPUT_PULLUP);
+  pinMode(scl, OUTPUT);
+  for (uint8_t i = 0; i < 9; ++i) {
+    digitalWrite(scl, LOW);
+    delayMicroseconds(5);
+    digitalWrite(scl, HIGH);
+    delayMicroseconds(5);
+  }
+  pinMode(sda, OUTPUT);
+  digitalWrite(sda, LOW);
+  delayMicroseconds(5);
+  digitalWrite(scl, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(sda, HIGH);
+  pinMode(sda, INPUT_PULLUP);
+  pinMode(scl, INPUT_PULLUP);
+  activeI2cSda = 255;
+  activeI2cScl = 255;
 }
 
-enum BuzzType { BUZZ_NONE, BUZZ_DOUBLE, BUZZ_SINGLE };
-enum BuzzStep { BUZZ_IDLE, BUZZ_ON_1, BUZZ_OFF_1, BUZZ_ON_2 };
-BuzzType currentBuzz = BUZZ_NONE;
-BuzzStep currentBuzzStep = BUZZ_IDLE;
-unsigned long buzzStepStartTime = 0;
-const unsigned long BUZZ_ON_TIME = 150;
-const unsigned long BUZZ_OFF_TIME = 150;
+void selectI2CBus(uint8_t sda, uint8_t scl) {
+  if (activeI2cSda == sda && activeI2cScl == scl) return;
+  Wire.begin(sda, scl);
+  Wire.setClock(400000); // 400 kHz I2C Fast Mode
+  Wire.setClockStretchLimit(15000);
+  activeI2cSda = sda;
+  activeI2cScl = scl;
+}
 
-bool mpuWriteRegister(uint8_t address, uint8_t reg, uint8_t value)
-{
-  Wire.beginTransmission(address);
+bool mpuWriteRegister(const ImuBus &bus, uint8_t reg, uint8_t value) {
+  selectI2CBus(bus.sda, bus.scl);
+  Wire.beginTransmission(bus.address);
   Wire.write(reg);
   Wire.write(value);
-  return Wire.endTransmission() == 0;
+  return Wire.endTransmission(true) == 0;
 }
 
-bool mpuReadRegisters(uint8_t address, uint8_t startRegister, uint8_t *buffer, uint8_t length)
-{
-  Wire.beginTransmission(address);
-  Wire.write(startRegister);
-  if (Wire.endTransmission(false) != 0)
-    return false;
+bool mpuReadRegistersOnce(const ImuBus &bus, uint8_t startReg, uint8_t *buffer, uint8_t length) {
+  selectI2CBus(bus.sda, bus.scl);
+  Wire.beginTransmission(bus.address);
+  Wire.write(startReg);
+  if (Wire.endTransmission(false) != 0) return false;
 
-  uint8_t received = Wire.requestFrom(address, length, (uint8_t)true);
-  if (received != length)
-    return false;
+  uint8_t received = Wire.requestFrom((uint8_t)bus.address, (uint8_t)length, (uint8_t)true);
+  if (received != length) return false;
 
-  for (uint8_t i = 0; i < length; i++)
-    buffer[i] = Wire.read();
-
+  for (uint8_t i = 0; i < length; i++) buffer[i] = Wire.read();
   return true;
 }
 
-bool mpuPresent(uint8_t address)
-{
+bool mpuReadRegisters(const ImuBus &bus, uint8_t startReg, uint8_t *buffer, uint8_t length) {
+  if (mpuReadRegistersOnce(bus, startReg, buffer, length)) return true;
+  // Single fast retry to ride through transient wire noise
+  return mpuReadRegistersOnce(bus, startReg, buffer, length);
+}
+
+bool mpuPresent(const ImuBus &bus) {
   uint8_t whoAmI = 0;
-  if (!mpuReadRegisters(address, MPU_WHO_AM_I, &whoAmI, 1))
-    return false;
-  return whoAmI == 0x68 || whoAmI == 0x70 || whoAmI == 0x72;
+  if (!mpuReadRegisters(bus, MPU_WHO_AM_I, &whoAmI, 1)) return false;
+  // Support MPU6050 (0x68/0x69/0x72), MPU6500 (0x70), MPU9250 (0x71), MPU9255 (0x73), ICM-20689 (0x98)
+  return whoAmI == 0x68 || whoAmI == 0x69 || whoAmI == 0x70 ||
+         whoAmI == 0x71 || whoAmI == 0x72 || whoAmI == 0x73 || whoAmI == 0x98;
 }
 
-bool mpuInit(uint8_t address)
-{
-  if (!mpuPresent(address))
-    return false;
-
-  if (!mpuWriteRegister(address, MPU_PWR_MGMT_1, 0x00)) return false;
-  if (!mpuWriteRegister(address, MPU_SMPLRT_DIV, 9)) return false;
-  if (!mpuWriteRegister(address, MPU_CONFIG, 0x03)) return false;
-  if (!mpuWriteRegister(address, MPU_GYRO_CONFIG, 0x00)) return false;
-  if (!mpuWriteRegister(address, MPU_ACCEL_CONFIG, 0x00)) return false;
-  delay(100);
-  return mpuPresent(address);
+bool mpuInit(const ImuBus &bus) {
+  if (!mpuPresent(bus)) {
+    recoverI2CBus(bus.sda, bus.scl);
+    if (!mpuPresent(bus)) return false;
+  }
+  if (!mpuWriteRegister(bus, MPU_PWR_MGMT_1, 0x00))   return false; // Wake up
+  if (!mpuWriteRegister(bus, MPU_CONFIG, 0x03))       return false; // 44 Hz DLPF (1 kHz gyro base)
+  if (!mpuWriteRegister(bus, MPU_SMPLRT_DIV, 4))      return false; // 1000 / (1 + 4) = 200 Hz
+  if (!mpuWriteRegister(bus, MPU_GYRO_CONFIG, 0x00))  return false; // +/- 250 deg/s (131 LSB/deg/s)
+  if (!mpuWriteRegister(bus, MPU_ACCEL_CONFIG, 0x00)) return false; // +/- 2g
+  serviceNetworkDelay(50);
+  return mpuPresent(bus);
 }
 
-bool mpuReadRaw(uint8_t address, SensorData &data)
-{
-  uint8_t buffer[14];
-  if (!mpuReadRegisters(address, MPU_ACCEL_XOUT_H, buffer, 14))
-    return false;
+bool mpuReadRaw(const ImuBus &bus, SensorData &data) {
+  uint8_t buf[14];
+  if (!mpuReadRegisters(bus, MPU_ACCEL_XOUT_H, buf, 14)) return false;
 
-  data.ax = (int16_t)((buffer[0] << 8) | buffer[1]);
-  data.ay = (int16_t)((buffer[2] << 8) | buffer[3]);
-  data.az = (int16_t)((buffer[4] << 8) | buffer[5]);
-  data.gx = (int16_t)((buffer[8] << 8) | buffer[9]);
-  data.gy = (int16_t)((buffer[10] << 8) | buffer[11]);
-  data.gz = (int16_t)((buffer[12] << 8) | buffer[13]);
+  data.ax = (int16_t)((buf[0] << 8) | buf[1]);
+  data.ay = (int16_t)((buf[2] << 8) | buf[3]);
+  data.az = (int16_t)((buf[4] << 8) | buf[5]);
+  data.gx = (int16_t)((buf[8] << 8) | buf[9]);
+  data.gy = (int16_t)((buf[10] << 8) | buf[11]);
+  data.gz = (int16_t)((buf[12] << 8) | buf[13]);
+
+  // All-zero frame means sensor reset into sleep mode or bus is stuck low
+  if (data.ax == 0 && data.ay == 0 && data.az == 0 &&
+      data.gx == 0 && data.gy == 0 && data.gz == 0) {
+    return false;
+  }
   return true;
 }
 
-float calculatePitchAngle(const SensorData &data)
-{
-  float ax = (float)data.ax, ay = (float)data.ay, az = (float)data.az;
-  return atan2f(ay, sqrtf((ax * ax) + (az * az))) * 180.0f / PI;
+// Compute singularity-free Pitch (front/back) and Roll (sideways) + matched gyro rates
+// using du/dt = -omega x u for whichever mounting orientation was detected.
+void computeAnglesAndRatesFloat(float ax, float ay, float az,
+                                float gx, float gy, float gz,
+                                const SensorCal &cal,
+                                float &measPitch, float &measRoll,
+                                float &pitchRate, float &rollRate) {
+  const float wx = (gx - cal.gxBias) / 131.0f;
+  const float wy = (gy - cal.gyBias) / 131.0f;
+  const float wz = (gz - cal.gzBias) / 131.0f;
+  const float s = cal.mountSign;
+
+  float rawPitch = 0.0f, rawRoll = 0.0f;
+  float rawPitchRate = 0.0f, rawRollRate = 0.0f;
+
+  switch (cal.mountAxis) {
+    case MOUNT_VERT_X:
+      // PCB vertical on back: X up/down, Z out of back, Y left/right
+      rawPitch = atan2f(az, sqrtf((ax * ax) + (ay * ay))) * RAD_TO_DEG_F;
+      rawRoll  = atan2f(ay, sqrtf((ax * ax) + (az * az))) * RAD_TO_DEG_F;
+      rawPitchRate = s * wy;
+      rawRollRate  = -s * wz;
+      break;
+
+    case MOUNT_VERT_Y:
+      // PCB vertical on back: Y up/down, Z out of back, X left/right
+      rawPitch = atan2f(az, sqrtf((ax * ax) + (ay * ay))) * RAD_TO_DEG_F;
+      rawRoll  = atan2f(-ax, sqrtf((ay * ay) + (az * az))) * RAD_TO_DEG_F;
+      rawPitchRate = -s * wx;
+      rawRollRate  = -s * wz;
+      break;
+
+    case MOUNT_FLAT_Z:
+    default:
+      // PCB horizontal: Z up/down, X forward/back, Y left/right
+      rawPitch = atan2f(-ax, sqrtf((ay * ay) + (az * az))) * RAD_TO_DEG_F;
+      rawRoll  = atan2f(ay, sqrtf((ax * ax) + (az * az))) * RAD_TO_DEG_F;
+      rawPitchRate = s * wy;
+      rawRollRate  = s * wx;
+      break;
+  }
+
+#if SPINEALIGN_SWAP_PITCH_ROLL
+  measPitch = rawRoll * (float)SPINEALIGN_PITCH_SIGN;
+  pitchRate = rawRollRate * (float)SPINEALIGN_PITCH_SIGN;
+  measRoll  = rawPitch * (float)SPINEALIGN_ROLL_SIGN;
+  rollRate  = rawPitchRate * (float)SPINEALIGN_ROLL_SIGN;
+#else
+  measPitch = rawPitch * (float)SPINEALIGN_PITCH_SIGN;
+  pitchRate = rawPitchRate * (float)SPINEALIGN_PITCH_SIGN;
+  measRoll  = rawRoll * (float)SPINEALIGN_ROLL_SIGN;
+  rollRate  = rawRollRate * (float)SPINEALIGN_ROLL_SIGN;
+#endif
 }
 
-float calculateRollAngle(const SensorData &data)
-{
-  return atan2f(-(float)data.ax, (float)data.az) * 180.0f / PI;
+void computeAnglesAndRates(const SensorData &d, const SensorCal &cal,
+                           float &measPitch, float &measRoll,
+                           float &pitchRate, float &rollRate) {
+  computeAnglesAndRatesFloat((float)d.ax, (float)d.ay, (float)d.az,
+                             (float)d.gx, (float)d.gy, (float)d.gz,
+                             cal, measPitch, measRoll, pitchRate, rollRate);
 }
 
-float calculatePitchRate(const SensorData &data) { return (float)data.gx / 131.0f; }
-float calculateRollRate(const SensorData &data) { return (float)data.gy / 131.0f; }
+bool calibrateSingleSensor(const ImuBus &bus, SensorCal &cal,
+                           KalmanFilter &pitchFilter, KalmanFilter &rollFilter,
+                           int sampleCount) {
+  float sumAx = 0.0f, sumAy = 0.0f, sumAz = 0.0f;
+  float sumGx = 0.0f, sumGy = 0.0f, sumGz = 0.0f;
+  int validSamples = 0;
 
-void updateSensor(uint8_t address, KalmanFilter &pitchFilter, KalmanFilter &rollFilter,
-                  float &outputPitch, float &outputRoll, float zeroPitch, float zeroRoll,
-                  bool &available, float dt)
-{
+  for (int i = 0; i < sampleCount; ++i) {
+    SensorData d;
+    if (mpuReadRaw(bus, d)) {
+      sumAx += (float)d.ax;
+      sumAy += (float)d.ay;
+      sumAz += (float)d.az;
+      sumGx += (float)d.gx;
+      sumGy += (float)d.gy;
+      sumGz += (float)d.gz;
+      validSamples++;
+    }
+    serviceNetworkDelay(2);
+  }
+
+  if (validSamples < sampleCount / 2) return false;
+
+  const float invN = 1.0f / (float)validSamples;
+  const float avgAx = sumAx * invN;
+  const float avgAy = sumAy * invN;
+  const float avgAz = sumAz * invN;
+
+  // Reject impossible gravity vector (corrupt/asleep sensor or violent shaking)
+  const float gMag = sqrtf((avgAx * avgAx) + (avgAy * avgAy) + (avgAz * avgAz));
+  if (!isfinite(gMag) || gMag < MIN_GRAVITY_LSB || gMag > MAX_GRAVITY_LSB) {
+    return false;
+  }
+
+  cal.gxBias = sumGx * invN;
+  cal.gyBias = sumGy * invN;
+  cal.gzBias = sumGz * invN;
+
+  // Detect dominant gravity axis to prevent gimbal lock in vertical or flat mounting
+  const float absAx = fabsf(avgAx);
+  const float absAy = fabsf(avgAy);
+  const float absAz = fabsf(avgAz);
+  if (absAz >= absAx && absAz >= absAy) {
+    cal.mountAxis = MOUNT_FLAT_Z;
+    cal.mountSign = (avgAz >= 0.0f) ? 1.0f : -1.0f;
+  } else if (absAx >= absAy) {
+    cal.mountAxis = MOUNT_VERT_X;
+    cal.mountSign = (avgAx >= 0.0f) ? 1.0f : -1.0f;
+  } else {
+    cal.mountAxis = MOUNT_VERT_Y;
+    cal.mountSign = (avgAy >= 0.0f) ? 1.0f : -1.0f;
+  }
+
+  float initPitch = 0.0f, initRoll = 0.0f, dummyPR = 0.0f, dummyRR = 0.0f;
+  computeAnglesAndRatesFloat(avgAx, avgAy, avgAz, cal.gxBias, cal.gyBias, cal.gzBias,
+                             cal, initPitch, initRoll, dummyPR, dummyRR);
+  cal.pitchZero = safeFloat(initPitch, 0.0f);
+  cal.rollZero  = safeFloat(initRoll, 0.0f);
+  pitchFilter.reset(cal.pitchZero);
+  rollFilter.reset(cal.rollZero);
+  return true;
+}
+
+void detectAndInitIMUs() {
+  const ImuBus bus1Primary   = { NECK_SDA_PIN, NECK_SCL_PIN, MPU_DEFAULT_ADDRESS }; // D2/D1 @ 0x68
+  const ImuBus bus2Primary   = { BACK_SDA_PIN, BACK_SCL_PIN, MPU_DEFAULT_ADDRESS }; // D6/D7 @ 0x68
+  const ImuBus bus1Secondary = { NECK_SDA_PIN, NECK_SCL_PIN, MPU_ALT_ADDRESS };     // D2/D1 @ 0x69 (shared-bus fallback)
+
+#if SPINEALIGN_DUAL_IMU == 1
+  dualImuActive = true;
+  neckBus = bus1Primary;
+  neckAvailable = mpuInit(neckBus);
+  if (mpuInit(bus2Primary)) {
+    backBus = bus2Primary;
+    backAvailable = true;
+  } else if (mpuInit(bus1Secondary)) {
+    backBus = bus1Secondary;
+    backAvailable = true;
+  } else {
+    backBus = bus2Primary;
+    backAvailable = false;
+  }
+#elif SPINEALIGN_DUAL_IMU == 0
+  dualImuActive = false;
+  neckAvailable = false;
+  if (mpuInit(bus2Primary)) {
+    backBus = bus2Primary;
+    backAvailable = true;
+  } else if (mpuInit(bus1Primary)) {
+    backBus = bus1Primary;
+    backAvailable = true;
+  } else {
+    backBus = bus1Primary;
+    backAvailable = false;
+  }
+#else
+  // Auto-detect: supports Dual IMU on separate D2/D1 + D6/D7 pins (both 0x68),
+  // shared D2/D1 pins (0x68 + 0x69), or Single IMU on either D2/D1 or D6/D7.
+  const bool hasBus1 = mpuInit(bus1Primary);
+  const bool hasBus2 = mpuInit(bus2Primary);
+
+  if (hasBus1 && hasBus2) {
+    dualImuActive = true;
+    neckBus = bus1Primary;
+    backBus = bus2Primary;
+    neckAvailable = true;
+    backAvailable = true;
+  } else if (hasBus1 && mpuInit(bus1Secondary)) {
+    dualImuActive = true;
+    neckBus = bus1Primary;
+    backBus = bus1Secondary;
+    neckAvailable = true;
+    backAvailable = true;
+  } else if (hasBus2) {
+    dualImuActive = false;
+    backBus = bus2Primary;
+    neckAvailable = false;
+    backAvailable = true;
+  } else if (hasBus1) {
+    dualImuActive = false;
+    backBus = bus1Primary;
+    neckAvailable = false;
+    backAvailable = true;
+  } else {
+    dualImuActive = false;
+    backBus = bus1Primary;
+    neckAvailable = false;
+    backAvailable = false;
+  }
+#endif
+  neckFailCount = 0;
+  backFailCount = 0;
+}
+
+void updateSensor(const ImuBus &bus, const SensorCal &cal,
+                  KalmanFilter &pitchFilter, KalmanFilter &rollFilter,
+                  float &outputPitch, float &outputRoll,
+                  bool &available, uint8_t &failCount,
+                  unsigned long &lastReinitAttempt, float dt) {
+  // If offline, back off re-init attempts to 1 Hz so we don't stall the 200 Hz loop
+  if (!available) {
+    const unsigned long now = millis();
+    if (now - lastReinitAttempt < SENSOR_REINIT_MS) return;
+    lastReinitAttempt = now;
+    if (!mpuInit(bus)) return;
+
+    SensorData seed;
+    if (!mpuReadRaw(bus, seed)) return;
+    float p = 0.0f, r = 0.0f, pr = 0.0f, rr = 0.0f;
+    computeAnglesAndRates(seed, cal, p, r, pr, rr);
+    pitchFilter.reset(p);
+    rollFilter.reset(r);
+    outputPitch = clampAngle(p - cal.pitchZero);
+    outputRoll  = clampAngle(r - cal.rollZero);
+    failCount = 0;
+    available = true;
+    return;
+  }
+
   SensorData data;
-  if (!mpuReadRaw(address, data)) { available = false; return; }
-  available = true;
-  outputPitch = pitchFilter.update(calculatePitchAngle(data), calculatePitchRate(data), dt) - zeroPitch;
-  outputRoll = rollFilter.update(calculateRollAngle(data), calculateRollRate(data), dt) - zeroRoll;
+  if (!mpuReadRaw(bus, data)) {
+    if (failCount < 255) failCount++;
+    // Require 3 consecutive failed reads (~15 ms) before flagging offline
+    if (failCount >= 3) {
+      available = false;
+      lastReinitAttempt = millis();
+    }
+    return;
+  }
+
+  failCount = 0;
+  float measPitch = 0.0f, measRoll = 0.0f, pitchRate = 0.0f, rollRate = 0.0f;
+  computeAnglesAndRates(data, cal, measPitch, measRoll, pitchRate, rollRate);
+  outputPitch = clampAngle(pitchFilter.update(measPitch, pitchRate, dt) - cal.pitchZero);
+  outputRoll  = clampAngle(rollFilter.update(measRoll, rollRate, dt) - cal.rollZero);
 }
+
+// ---------------- Battery ----------------
 
 void updateBatteryTelemetry() {
 #if BATTERY_MONITOR_ENABLED
   const unsigned long now = millis();
-  if (now - lastBatteryRead < 1000) return;
+  if (now - lastBatteryRead < 2000) return;
   lastBatteryRead = now;
 
-  // NodeMCU onboard divider maps 0-3.3V to 0-1.0V internal ADC.
-  // Standard Li-ion 1S 3.0V - 4.2V can be monitored via voltage divider to A0.
   int raw = analogRead(BATTERY_ADC_PIN);
   float pinVoltage = (raw / 1023.0f) * 3.3f;
-  // If pinVoltage is below 0.1V, treat as unmonitored / disconnected.
   if (pinVoltage < 0.2f) {
     batteryVoltage = -1.0f;
     batteryPercent = -1;
     batteryTelemetryAvailable = false;
     return;
   }
-  // With a 100k:33k or similar divider, calibrate divider ratio:
-  float measuredVoltage = pinVoltage * 1.3f; 
+  float measuredVoltage = pinVoltage * 1.3f; // Calibrate multiplier for your voltage divider
   if (measuredVoltage >= 3.0f && measuredVoltage <= 4.5f) {
     batteryVoltage = measuredVoltage;
     batteryPercent = (int)constrain((batteryVoltage - 3.2f) / (4.2f - 3.2f) * 100.0f, 0.0f, 100.0f);
@@ -317,429 +695,371 @@ void updateBatteryTelemetry() {
 #endif
 }
 
-void calibrateSensors()
-{
-  isCalibrated = false; badPosture = false; alertActive = false;
-  badPostureStartTime = 0; lastAlertTime = 0; currentBuzz = BUZZ_NONE; currentBuzzStep = BUZZ_IDLE;
+// ---------------- Calibration & Alerts ----------------
+
+void calibrateSensors() {
+  calibrating = true;
+  isCalibrated = false;
+  badPosture = false;
+  alertActive = false;
+  badPostureStartTime = 0;
+  lastAlertTime = 0;
+  currentBuzz = BUZZ_NONE;
+  currentBuzzStep = BUZZ_IDLE;
   digitalWrite(ALERT_PIN, LOW);
 
-  SensorData neckData{}, backData{};
-  bool neckReadOK = true;
-#if SPINEALIGN_DUAL_IMU
-  neckReadOK = mpuReadRaw(NECK_MPU_ADDRESS, neckData);
+#if SPINEALIGN_DUAL_IMU < 0
+  detectAndInitIMUs();
+#else
+  if (dualImuActive && !neckAvailable) neckAvailable = mpuInit(neckBus);
+  if (!backAvailable) backAvailable = mpuInit(backBus);
 #endif
-  const uint8_t backAddress = SPINEALIGN_DUAL_IMU ? BACK_MPU_ADDRESS : NECK_MPU_ADDRESS;
-  const bool backReadOK = mpuReadRaw(backAddress, backData);
-  if (!neckReadOK || !backReadOK) {
-    Serial.println("CALIBRATION FAILED");
+
+  const bool neckOK = dualImuActive
+      ? calibrateSingleSensor(neckBus, neckCal, neckPitchFilter, neckRollFilter, 40)
+      : true;
+  const bool backOK = calibrateSingleSensor(backBus, backCal, backPitchFilter, backRollFilter, 40);
+
+  neckAvailable = dualImuActive && neckOK;
+  backAvailable = backOK;
+  neckFailCount = 0;
+  backFailCount = 0;
+  lastSensorTime = millis();
+
+  if (!neckOK || !backOK) {
+    calibrating = false;
     sendBroadcastLine("CALIBRATION FAILED");
-    if (displayAvailable) {
-      display.clearDisplay(); display.setTextSize(1); display.setCursor(0, 0);
-      display.println("Calibration failed"); display.println("Check sensors"); display.display();
-    }
+    broadcastTelemetry();
     return;
   }
 
-#if SPINEALIGN_DUAL_IMU
-  const float neckInitialPitch = calculatePitchAngle(neckData);
-  const float neckInitialRoll = calculateRollAngle(neckData);
-  neckPitchZero = neckInitialPitch; neckRollZero = neckInitialRoll;
-  neckPitchFilter.reset(neckInitialPitch); neckRollFilter.reset(neckInitialRoll);
-#else
-  neckPitchZero = neckRollZero = 0.0f;
-  neckPitchFilter.reset(0.0f); neckRollFilter.reset(0.0f);
-  neckPitch = neckRoll = neckAngle = 0.0f;
-#endif
-  const float backInitialPitch = calculatePitchAngle(backData);
-  const float backInitialRoll = calculateRollAngle(backData);
-  backPitchZero = backInitialPitch; backRollZero = backInitialRoll;
-  backPitchFilter.reset(backInitialPitch); backRollFilter.reset(backInitialRoll);
-#if SPINEALIGN_DUAL_IMU
-  neckPitch = neckRoll = neckAngle = 0.0f;
-#endif
-  backPitch = backRoll = backAngle = 0.0f;
-  badPosture = false; alertActive = false; badPostureStartTime = 0; lastAlertTime = 0;
-  isCalibrated = true; currentBuzz = BUZZ_NONE; currentBuzzStep = BUZZ_IDLE;
-  digitalWrite(ALERT_PIN, LOW);
-  Serial.println("CALIBRATED");
-  sendBroadcastLine("CALIBRATED");
-  if (displayAvailable) {
-    display.clearDisplay(); display.setTextSize(1); display.setCursor(0, 0);
-    display.println("Calibration complete"); display.println("Posture reference set"); display.display();
+  if (!dualImuActive) {
+    neckCal.pitchZero = neckCal.rollZero = 0.0f;
+    neckPitchFilter.reset(0.0f);
+    neckRollFilter.reset(0.0f);
   }
-  delay(500);
+
+  neckPitch = neckRoll = neckAngle = 0.0f;
+  backPitch = backRoll = backAngle = 0.0f;
+  isCalibrated = true;
+  calibrating = false;
+  sendBroadcastLine("CALIBRATED");
+  broadcastTelemetry();
 }
 
-void startAlert(BuzzType type)
-{
+void startAlert(BuzzType type) {
   currentBuzz = type;
   currentBuzzStep = BUZZ_ON_1;
   buzzStepStartTime = millis();
   digitalWrite(ALERT_PIN, HIGH);
 }
 
-void updateAlert()
-{
-  if (currentBuzz == BUZZ_NONE)
-  {
+void updateAlert() {
+  if (currentBuzz == BUZZ_NONE) {
     digitalWrite(ALERT_PIN, LOW);
     return;
   }
 
-  unsigned long currentTime = millis();
-  switch (currentBuzzStep)
-  {
+  unsigned long now = millis();
+  switch (currentBuzzStep) {
     case BUZZ_ON_1:
-      if (currentTime - buzzStepStartTime >= BUZZ_ON_TIME)
-      {
+      if (now - buzzStepStartTime >= BUZZ_ON_TIME) {
         digitalWrite(ALERT_PIN, LOW);
         currentBuzzStep = BUZZ_OFF_1;
-        buzzStepStartTime = currentTime;
+        buzzStepStartTime = now;
       }
       break;
-
     case BUZZ_OFF_1:
-      if (currentTime - buzzStepStartTime >= BUZZ_OFF_TIME)
-      {
-        if (currentBuzz == BUZZ_DOUBLE)
-        {
+      if (now - buzzStepStartTime >= BUZZ_OFF_TIME) {
+        if (currentBuzz == BUZZ_DOUBLE) {
           digitalWrite(ALERT_PIN, HIGH);
           currentBuzzStep = BUZZ_ON_2;
-          buzzStepStartTime = currentTime;
-        }
-        else
-        {
+          buzzStepStartTime = now;
+        } else {
           currentBuzz = BUZZ_NONE;
           currentBuzzStep = BUZZ_IDLE;
         }
       }
       break;
-
     case BUZZ_ON_2:
-      if (currentTime - buzzStepStartTime >= BUZZ_ON_TIME)
-      {
+      if (now - buzzStepStartTime >= BUZZ_ON_TIME) {
         digitalWrite(ALERT_PIN, LOW);
         currentBuzz = BUZZ_NONE;
         currentBuzzStep = BUZZ_IDLE;
       }
       break;
-
-    case BUZZ_IDLE:
     default:
       currentBuzz = BUZZ_NONE;
+      currentBuzzStep = BUZZ_IDLE;
       digitalWrite(ALERT_PIN, LOW);
       break;
   }
 }
 
-void updatePosture()
-{
+void updatePosture() {
   if (!isCalibrated) return;
-  if (!backAvailable
-#if SPINEALIGN_DUAL_IMU
-      || !neckAvailable
-#endif
-  ) {
-    if (badPosture || alertActive || currentBuzz != BUZZ_NONE)
-      Serial.println("POSTURE MONITORING PAUSED - SENSOR ERROR");
-    badPosture = false; alertActive = false; badPostureStartTime = 0; lastAlertTime = 0;
-    currentBuzz = BUZZ_NONE; currentBuzzStep = BUZZ_IDLE; digitalWrite(ALERT_PIN, LOW);
+  if (!backAvailable || (dualImuActive && !neckAvailable)) {
+    badPosture = false;
+    alertActive = false;
+    badPostureStartTime = 0;
+    lastAlertTime = 0;
+    currentBuzz = BUZZ_NONE;
+    currentBuzzStep = BUZZ_IDLE;
+    digitalWrite(ALERT_PIN, LOW);
     return;
   }
-  float maximumDeviation = fabsf(backAngle);
-#if SPINEALIGN_DUAL_IMU
-  maximumDeviation = max(maximumDeviation, fabsf(neckAngle));
-#endif
-  const unsigned long currentTime = millis();
+
+  float maxDev = fabsf(backAngle);
+  if (dualImuActive) {
+    maxDev = fmaxf(maxDev, fabsf(neckAngle));
+  }
+
+  const unsigned long now = millis();
   if (!badPosture) {
-    if (maximumDeviation >= POSTURE_THRESHOLD_DEG) {
-      badPosture = true; alertActive = false; badPostureStartTime = currentTime;
+    if (maxDev >= POSTURE_THRESHOLD_DEG) {
+      badPosture = true;
+      alertActive = false;
+      badPostureStartTime = now;
     }
     return;
   }
+
   if (!alertActive) {
-    if (maximumDeviation < POSTURE_THRESHOLD_DEG) {
-      badPosture = false; badPostureStartTime = 0; lastAlertTime = 0;
-      Serial.println("POSTURE RECOVERED BEFORE ALERT"); return;
+    if (maxDev < POSTURE_THRESHOLD_DEG) {
+      badPosture = false;
+      badPostureStartTime = 0;
+      lastAlertTime = 0;
+      return;
     }
-    if (currentTime - badPostureStartTime >= BAD_POSTURE_HOLD_MS) {
-      startAlert(BUZZ_DOUBLE); alertActive = true; lastAlertTime = currentTime;
-      Serial.println("BAD POSTURE ALERT");
+    if (now - badPostureStartTime >= BAD_POSTURE_HOLD_MS) {
+      startAlert(BUZZ_DOUBLE);
+      alertActive = true;
+      lastAlertTime = now;
     }
     return;
   }
-  if (maximumDeviation < RECOVER_THRESHOLD_DEG) {
-    badPosture = false; alertActive = false; badPostureStartTime = 0; lastAlertTime = 0;
-    currentBuzz = BUZZ_NONE; currentBuzzStep = BUZZ_IDLE; digitalWrite(ALERT_PIN, LOW);
-    Serial.println("POSTURE RECOVERED"); return;
-  }
-  if (currentTime - lastAlertTime >= ALERT_REPEAT_MS) {
-    startAlert(BUZZ_SINGLE); lastAlertTime = currentTime; Serial.println("REPEATED POSTURE ALERT");
-  }
-}
 
-String serialCommand = "";
+  if (maxDev < RECOVER_THRESHOLD_DEG) {
+    badPosture = false;
+    alertActive = false;
+    badPostureStartTime = 0;
+    lastAlertTime = 0;
+    currentBuzz = BUZZ_NONE;
+    currentBuzzStep = BUZZ_IDLE;
+    digitalWrite(ALERT_PIN, LOW);
+    return;
+  }
 
-void handleSerialCommands()
-{
-  while (Serial.available() > 0)
-  {
-    char receivedCharacter = (char)Serial.read();
-    if (receivedCharacter == '\n' || receivedCharacter == '\r')
-    {
-      if (serialCommand.length() > 0)
-      {
-        serialCommand.trim();
-        serialCommand.toUpperCase();
-        if (serialCommand == "CALIBRATE")
-          calibrateSensors();
-        serialCommand = "";
-      }
-    }
-    else
-    {
-      serialCommand += receivedCharacter;
-      if (serialCommand.length() > 40)
-        serialCommand = "";
-    }
+  if (now - lastAlertTime >= ALERT_REPEAT_MS) {
+    startAlert(BUZZ_SINGLE);
+    lastAlertTime = now;
   }
 }
 
-void printFixedAngle(float value)
-{
-  char buf[8];
-  dtostrf(value, 6, 1, buf);
-  display.print(buf);
-}
-
-void updateOLED()
-{
-  if (!displayAvailable) return;
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("SpineAlign NodeMCU");
-  display.setCursor(0, 13);
-  display.print("Neck:");
-#if SPINEALIGN_DUAL_IMU
-  printFixedAngle(neckAngle);
-#else
-  display.print(" N/A");
-#endif
-  display.println((char)247);
-  display.setCursor(0, 25);
-  display.print("Back:");
-  printFixedAngle(backAngle);
-  display.println((char)247);
-
-  if (!backAvailable
-#if SPINEALIGN_DUAL_IMU
-      || !neckAvailable
-#endif
-  ) {
-    display.setTextSize(1);
-    display.setCursor(0, 44);
-    display.println("SENSOR ERROR");
-  } else if (!isCalibrated) {
-    display.setTextSize(1);
-    display.setCursor(0, 44);
-    display.println("Press CALIBRATE");
-  } else {
-    display.setTextSize(2);
-    display.setCursor(38, 40);
-    display.println(badPosture ? "ALERT" : "GOOD");
-  }
-  display.display();
-}
-
-String buildTelemetryLine() {
-  String line; line.reserve(160);
-  line += "N:" + String(neckAngle, 1);
-  line += ",B:" + String(backAngle, 1);
-  line += ",NP:" + String(neckPitch, 1);
-  line += ",NR:" + String(neckRoll, 1);
-  line += ",BP:" + String(backPitch, 1);
-  line += ",BR:" + String(backRoll, 1);
-  line += ",MODE:" + String(SPINEALIGN_DUAL_IMU ? 2 : 1);
-  line += ",ALERT:" + String(badPosture ? 1 : 0);
-  line += ",CAL:" + String(isCalibrated ? 1 : 0);
-  line += ",NS:" + String(neckAvailable ? 1 : 0);
-  line += ",BS:" + String(backAvailable ? 1 : 0);
-  line += ",BAT:" + String(batteryTelemetryAvailable ? batteryVoltage : -1.0f, 2);
-  line += ",PCT:" + String(batteryTelemetryAvailable ? batteryPercent : -1);
-  line += ",CHG:-1";
-  line += ",FULL:-1";
-  return line;
-}
-
-void sendTelemetry() {
-  const String line = buildTelemetryLine();
-  Serial.println(line);
-  sendBroadcastLine(line);
-}
-
-void checkCalibrationButton()
-{
+// 100% non-blocking edge-triggered debounced calibration button
+void checkCalibrationButton() {
 #if CALIBRATION_BUTTON_PIN >= 0
-  bool currentButtonState = digitalRead(CALIBRATION_BUTTON_PIN);
-  unsigned long currentTime = millis();
+  const bool raw = digitalRead(CALIBRATION_BUTTON_PIN);
+  const unsigned long now = millis();
 
-  if (currentButtonState != lastButtonState)
-  {
-    lastButtonChangeTime = currentTime;
-    lastButtonState = currentButtonState;
+  if (raw != lastButtonRaw) {
+    lastButtonRaw = raw;
+    lastButtonChangeTime = now;
   }
 
-  if (currentTime - lastButtonChangeTime >= BUTTON_DEBOUNCE_MS)
-  {
-    if (currentButtonState == LOW)
-    {
-      calibrateSensors();
-      while (digitalRead(CALIBRATION_BUTTON_PIN) == LOW) {
-        delay(5);
-        yield();
-      }
-      lastButtonState = HIGH;
+  if (now - lastButtonChangeTime >= BUTTON_DEBOUNCE_MS) {
+    if (raw == LOW && !buttonPressedStable) {
+      buttonPressedStable = true;
+      calibrationRequested = true;
+    } else if (raw == HIGH) {
+      buttonPressedStable = false;
     }
   }
 #endif
+}
+
+// ---------------- Zero-Allocation Telemetry & HTTP Server ----------------
+
+size_t formatTelemetryLine(char *buf, size_t bufSize) {
+  const int len = snprintf(
+      buf, bufSize,
+      "N:%.1f,B:%.1f,NP:%.1f,NR:%.1f,BP:%.1f,BR:%.1f,MODE:%d,ALERT:%d,CAL:%d,NS:%d,BS:%d,BAT:%.2f,PCT:%d,CHG:-1,FULL:-1",
+      clampAngle(neckAngle),
+      clampAngle(backAngle),
+      clampAngle(neckPitch),
+      clampAngle(neckRoll),
+      clampAngle(backPitch),
+      clampAngle(backRoll),
+      dualImuActive ? 2 : 1,
+      badPosture ? 1 : 0,
+      isCalibrated ? 1 : 0,
+      neckAvailable ? 1 : 0,
+      backAvailable ? 1 : 0,
+      batteryTelemetryAvailable ? safeFloat(batteryVoltage, -1.0f) : -1.0f,
+      batteryTelemetryAvailable ? batteryPercent : -1);
+  if (len <= 0) return 0;
+  return (len < (int)bufSize) ? (size_t)len : (bufSize - 1);
+}
+
+void sendTelemetryToClient(uint8_t num) {
+  char buf[192];
+  const size_t safeLen = formatTelemetryLine(buf, sizeof(buf));
+  if (safeLen > 0) {
+    webSocket.sendTXT(num, (const char *)buf, safeLen);
+  }
+}
+
+void broadcastTelemetry() {
+  if (webSocket.connectedClients() == 0) return;
+  char buf[192];
+  const size_t safeLen = formatTelemetryLine(buf, sizeof(buf));
+  if (safeLen > 0) {
+    webSocket.broadcastTXT((const char *)buf, safeLen);
+  }
+}
+
+void sendCorsHeaders() {
+  httpServer.sendHeader("Access-Control-Allow-Origin", "*");
+  httpServer.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  httpServer.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+void handleCalibrateHttp() {
+  if (!calibrating) calibrationRequested = true;
+  sendCorsHeaders();
+  httpServer.send(200, "application/json", "{\"status\":\"ok\",\"action\":\"calibrating\"}");
 }
 
 void setupWebServer() {
-  // CORS enabled status endpoint
   httpServer.on("/status", HTTP_GET, []() {
-    String json = "{";
-    json += "\"device\":\"SpineAlign-NodeMCU\",";
-    json += "\"mode\":" + String(SPINEALIGN_DUAL_IMU ? 2 : 1) + ",";
-    json += "\"ap\":" + String(apModeActive ? "true" : "false") + ",";
-    json += "\"ip\":\"" + (apModeActive ? WiFi.softAPIP().toString() : WiFi.localIP().toString()) + "\",";
-    json += "\"wsPort\":81,";
-    json += "\"calibrated\":" + String(isCalibrated ? "true" : "false") + ",";
-    json += "\"badPosture\":" + String(badPosture ? "true" : "false") + ",";
-    json += "\"neckAngle\":" + String(neckAngle, 1) + ",";
-    json += "\"backAngle\":" + String(backAngle, 1);
-    json += "}";
-    httpServer.sendHeader("Access-Control-Allow-Origin", "*");
+    char json[384];
+    String ipStr = apModeActive ? WiFi.softAPIP().toString() : WiFi.localIP().toString();
+    snprintf(
+        json, sizeof(json),
+        "{\"device\":\"SpineAlign-NodeMCU\",\"mode\":%d,\"ap\":%s,\"ip\":\"%s\","
+        "\"wsPort\":81,\"rateHz\":25,\"clients\":%u,\"calibrated\":%s,"
+        "\"badPosture\":%s,\"alertActive\":%s,\"neckSensor\":%s,\"backSensor\":%s,"
+        "\"neckMount\":\"%s\",\"backMount\":\"%s\",\"neckAngle\":%.1f,\"backAngle\":%.1f,"
+        "\"freeHeap\":%u}",
+        dualImuActive ? 2 : 1,
+        apModeActive ? "true" : "false",
+        ipStr.c_str(),
+        (unsigned int)webSocket.connectedClients(),
+        isCalibrated ? "true" : "false",
+        badPosture ? "true" : "false",
+        alertActive ? "true" : "false",
+        neckAvailable ? "true" : "false",
+        backAvailable ? "true" : "false",
+        dualImuActive ? mountAxisName(neckCal.mountAxis) : "NONE",
+        mountAxisName(backCal.mountAxis),
+        clampAngle(neckAngle),
+        clampAngle(backAngle),
+        (unsigned int)ESP.getFreeHeap());
+    sendCorsHeaders();
     httpServer.send(200, "application/json", json);
   });
 
-  // HTTP calibration endpoint
-  httpServer.on("/calibrate", HTTP_GET, []() {
-    calibrationRequested = true;
-    httpServer.sendHeader("Access-Control-Allow-Origin", "*");
-    httpServer.send(200, "application/json", "{\"status\":\"ok\",\"action\":\"calibrating\"}");
+  httpServer.on("/calibrate", HTTP_GET, handleCalibrateHttp);
+  httpServer.on("/calibrate", HTTP_POST, handleCalibrateHttp);
+  httpServer.on("/calibrate", HTTP_OPTIONS, []() {
+    sendCorsHeaders();
+    httpServer.send(204);
   });
 
-  // Embedded lightweight dashboard landing page
   httpServer.on("/", HTTP_GET, []() {
-    String html = F("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    String html = F(
+      "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
       "<title>SpineAlign NodeMCU</title><style>"
-      ":root{--bg:#f3f5ef;--surface:#fffefb;--ink:#29372e;--primary:#66836d;--coral:#c77f72;--good:#4a8068;}"
-      "body{margin:0;padding:24px;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;}"
-      ".card{max-width:540px;margin:20px auto;background:var(--surface);border:1px solid #e1e7dc;border-radius:16px;padding:24px;box-shadow:0 3px 12px rgba(42,61,43,.04);}"
-      "h1{margin:0 0 8px;font-size:22px;color:#29382e;}p{color:#55645a;font-size:13px;line-height:1.6;margin:0 0 16px;}"
-      ".pill{display:inline-block;padding:5px 10px;border-radius:20px;font-size:11px;font-weight:700;background:#eef0ff;color:#5d69dc;margin-bottom:16px;}"
+      "body{margin:0;padding:24px;background:#f3f5ef;color:#29372e;font-family:system-ui,sans-serif;}"
+      ".card{max-width:480px;margin:20px auto;background:#fff;border:1px solid #e1e7dc;border-radius:16px;padding:24px;}"
+      ".meta{font-size:13px;color:#55645a;margin:6px 0 14px;}"
       ".angles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;}"
-      ".angle-box{background:#f6f8f4;border-radius:12px;padding:14px;text-align:center;}"
-      ".val{font-size:28px;font-weight:800;color:#29382e;margin-top:4px;}"
-      "button{width:100%;padding:13px;border:none;border-radius:10px;background:var(--primary);color:#fff;font-weight:700;font-size:13px;cursor:pointer;margin-top:8px;}"
-      "button:hover{background:#4f6e57;} .status{margin-top:14px;font-size:11px;color:#7f8a80;text-align:center;}"
+      ".box{background:#f6f8f4;border-radius:12px;padding:14px;text-align:center;}"
+      ".val{font-size:28px;font-weight:800;margin-top:4px;}"
+      "button{width:100%;padding:12px;border:none;border-radius:10px;background:#66836d;color:#fff;font-weight:700;cursor:pointer;}"
       "</style></head><body><div class='card'>"
-      "<h1>SpineAlign NodeMCU</h1><p>Wi-Fi Posture Companion streaming over WebSockets on port 81.</p>"
-      "<div class='pill' id='linkStatus'>Connecting WebSocket...</div>"
+      "<h2>SpineAlign NodeMCU (Wi-Fi)</h2>"
+      "<div class='meta'><span id='link'>Connecting...</span> &middot; <span id='mode'>Detecting IMU...</span></div>"
       "<div class='angles'>"
-      "<div class='angle-box'><div>Neck Angle</div><div class='val' id='neckVal'>--°</div></div>"
-      "<div class='angle-box'><div>Back Angle</div><div class='val' id='backVal'>--°</div></div>"
+      "<div class='box'><div>Neck</div><div class='val' id='n'>--&deg;</div></div>"
+      "<div class='box'><div>Back</div><div class='val' id='b'>--&deg;</div></div>"
       "</div>"
-      "<button id='calBtn' onclick='sendCalibrate()'>Calibrate Posture</button>"
-      "<div class='status' id='postureStatus'>Posture Good</div>"
-      "</div><script>"
-      "const wsUrl='ws://'+location.hostname+':81/';"
-      "let ws=null;"
-      "function connect(){"
-      "  ws=new WebSocket(wsUrl);"
-      "  ws.onopen=()=>{document.getElementById('linkStatus').innerText='WebSocket Connected';document.getElementById('linkStatus').style.background='#e5efe1';document.getElementById('linkStatus').style.color='#4b7955';};"
-      "  ws.onclose=()=>{document.getElementById('linkStatus').innerText='Disconnected. Reconnecting...';setTimeout(connect,2000);};"
-      "  ws.onmessage=(e)=>{"
-      "    const l=e.data.trim();"
-      "    if(l.includes('N:')&&l.includes('B:')){"
-      "      const parts=l.split(',');const d={};"
-      "      parts.forEach(p=>{const s=p.split(':');if(s.length===2)d[s[0]]=s[1];});"
-      "      if(d.N)document.getElementById('neckVal').innerText=d.N+'°';"
-      "      if(d.B)document.getElementById('backVal').innerText=d.B+'°';"
-      "      if(d.ALERT==='1'){document.getElementById('postureStatus').innerText='Posture Alert!';document.getElementById('postureStatus').style.color='#c77f72';}"
-      "      else{document.getElementById('postureStatus').innerText='Posture In Range';document.getElementById('postureStatus').style.color='#4a8068';}"
-      "    }"
-      "  };"
-      "}"
-      "function sendCalibrate(){if(ws&&ws.readyState===1)ws.send('CALIBRATE');}"
-      "connect();"
+      "<button onclick='cal()'>Calibrate Posture</button>"
+      "<p id='st'>Waiting for telemetry...</p></div><script>"
+      "let ws;function go(){ws=new WebSocket('ws://'+location.hostname+':81/');"
+      "ws.onopen=()=>document.getElementById('link').innerText='Connected';"
+      "ws.onclose=()=>{document.getElementById('link').innerText='Reconnecting...';setTimeout(go,2000);};"
+      "ws.onmessage=e=>{const d={};e.data.trim().split(',').forEach(p=>{const s=p.split(':');if(s.length===2)d[s[0]]=s[1];});"
+      "const dual=d.MODE==='2';"
+      "if(d.MODE){document.getElementById('mode').innerText=dual?'Dual IMU (MODE:2)':'Single IMU (MODE:1)';"
+      "document.getElementById('n').innerText=dual?(d.N+'\\u00B0'):'N/A';}"
+      "if(d.B)document.getElementById('b').innerText=d.B+'\\u00B0';"
+      "const st=document.getElementById('st');"
+      "if(d.BS==='0'||(dual&&d.NS==='0'))st.innerText='Sensor Offline - Check Wiring';"
+      "else if(d.CAL==='0')st.innerText='Press Calibrate Posture';"
+      "else if(d.ALERT==='1')st.innerText='Posture Alert!';"
+      "else if(d.ALERT==='0')st.innerText='Posture Good';};}"
+      "function cal(){if(ws&&ws.readyState===1)ws.send('CALIBRATE');}go();"
       "</script></body></html>");
     httpServer.send(200, "text/html", html);
   });
 
   httpServer.begin();
-  Serial.println("HTTP Web Server ready on port 80");
 }
 
 void setupWiFi() {
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
+  WiFi.setSleepMode(WIFI_NONE_SLEEP); // Eliminates 100-300 ms DTIM radio stalls
   WiFi.mode(WIFI_STA);
-  if (wifiCredentialsPresent()) {
-    Serial.printf("Connecting to Wi-Fi SSID: %s...\n", SPINEALIGN_WIFI_SSID);
-    WiFi.begin(SPINEALIGN_WIFI_SSID, SPINEALIGN_WIFI_PASSWORD);
 
-    unsigned long startAttempt = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
+  if (wifiCredentialsPresent()) {
+    WiFi.begin(SPINEALIGN_WIFI_SSID, SPINEALIGN_WIFI_PASSWORD);
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
       delay(250);
-      Serial.print(".");
+      yield();
     }
-    Serial.println();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
     apModeActive = false;
-    Serial.print("Connected to Wi-Fi! IP Address: ");
-    Serial.println(WiFi.localIP());
   } else {
-    // Fallback to Access Point (AP) mode
     apModeActive = true;
     WiFi.mode(WIFI_AP);
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
     IPAddress apIP(192, 168, 4, 1);
     IPAddress netMsk(255, 255, 255, 0);
     WiFi.softAPConfig(apIP, apIP, netMsk);
     WiFi.softAP("SpineAlign-NodeMCU");
-    Serial.print("Started Access Point 'SpineAlign-NodeMCU'. IP: ");
-    Serial.println(WiFi.softAPIP());
   }
 
-  // Setup mDNS responder (spinealign.local)
   if (MDNS.begin("spinealign")) {
-    Serial.println("mDNS responder started: http://spinealign.local");
     MDNS.addService("http", "tcp", 80);
     MDNS.addService("ws", "tcp", 81);
+    mdnsStarted = true;
   }
 
-  // Start WebSocket Server on port 81
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  Serial.println("WebSocket server ready on port 81");
-
-  // Start HTTP Server
+  // Automatically reap stale/dropped sockets so all 5 ESP8266 WS slots stay available
+  webSocket.enableHeartbeat(15000, 3000, 2);
   setupWebServer();
+  networkStarted = true;
+}
 
-  // Setup ArduinoOTA if password is configured
-  if (!isPlaceholderCredential(SPINEALIGN_OTA_PASSWORD) && strlen(SPINEALIGN_OTA_PASSWORD) >= 12) {
-    ArduinoOTA.setHostname("spinealign-nodemcu");
-    ArduinoOTA.setPassword(SPINEALIGN_OTA_PASSWORD);
-    ArduinoOTA.onStart([]() { Serial.println("OTA update started"); });
-    ArduinoOTA.onEnd([]() { Serial.println("OTA update finished"); });
-    ArduinoOTA.onError([](ota_error_t error) { Serial.printf("OTA Error[%u]\n", error); });
-    ArduinoOTA.begin();
-    otaStarted = true;
-    Serial.println("ArduinoOTA ready for over-the-air updates");
+void maintainWiFi() {
+  if (apModeActive || !wifiCredentialsPresent()) return;
+  const unsigned long now = millis();
+  if (now - lastWifiCheckTime < WIFI_RETRY_MS) return;
+  lastWifiCheckTime = now;
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.reconnect();
   }
 }
+
+// ---------------- Main Setup & Loop ----------------
 
 void setup() {
   pinMode(ALERT_PIN, OUTPUT);
@@ -748,52 +1068,32 @@ void setup() {
   pinMode(CALIBRATION_BUTTON_PIN, INPUT_PULLUP);
 #endif
 
-  Serial.begin(115200);
-  delay(300);
-  Serial.println();
-  Serial.println("==================================================");
-  Serial.println("SpineAlign NodeMCU ESP8266 (Wi-Fi + WebSockets)");
-  Serial.println("==================================================");
+  pinMode(NECK_SDA_PIN, INPUT_PULLUP);
+  pinMode(NECK_SCL_PIN, INPUT_PULLUP);
+  pinMode(BACK_SDA_PIN, INPUT_PULLUP);
+  pinMode(BACK_SCL_PIN, INPUT_PULLUP);
+  selectI2CBus(NECK_SDA_PIN, NECK_SCL_PIN);
 
-  Wire.begin(SDA_PIN, SCL_PIN);
-  Wire.setClock(100000);
+  detectAndInitIMUs();
 
-  displayAvailable = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
-  if (displayAvailable) {
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-    display.setTextSize(1);
-    display.setCursor(0, 0);
-    display.println("SpineAlign NodeMCU");
-    display.println("Starting Wi-Fi...");
-    display.display();
-  } else {
-    Serial.println("OLED not detected; continuing without display");
+  // Initial gyro bias & mount-axis capture so live motion is smooth even before manual calibration
+  if (dualImuActive && neckAvailable) {
+    calibrateSingleSensor(neckBus, neckCal, neckPitchFilter, neckRollFilter, 25);
+  }
+  if (backAvailable) {
+    calibrateSingleSensor(backBus, backCal, backPitchFilter, backRollFilter, 25);
   }
 
-#if SPINEALIGN_DUAL_IMU
-  neckAvailable = mpuInit(NECK_MPU_ADDRESS);
-  backAvailable = mpuInit(BACK_MPU_ADDRESS);
-  Serial.printf("Dual IMU mode; neck 0x68: %s\n", neckAvailable ? "OK" : "FAILED");
-  Serial.printf("Dual IMU mode; back 0x69: %s\n", backAvailable ? "OK" : "FAILED");
-#else
-  neckAvailable = false;
-  backAvailable = mpuInit(NECK_MPU_ADDRESS);
-  Serial.printf("Single IMU mode; back sensor on 0x68: %s\n", backAvailable ? "OK" : "FAILED");
-#endif
-
   setupWiFi();
-
-  lastSensorTime = lastOLEDTime = lastSerialTime = lastBatteryRead = millis();
+  lastSensorTime = lastTelemetryTime = lastBatteryRead = lastWifiCheckTime = millis();
 }
 
 void loop() {
   webSocket.loop();
   httpServer.handleClient();
-  MDNS.update();
-  if (otaStarted) ArduinoOTA.handle();
+  if (mdnsStarted) MDNS.update();
+  maintainWiFi();
 
-  handleSerialCommands();
   checkCalibrationButton();
   updateAlert();
 
@@ -804,36 +1104,34 @@ void loop() {
 
   updateBatteryTelemetry();
 
-  const unsigned long currentTime = millis();
-  if (currentTime - lastSensorTime >= SENSOR_INTERVAL_MS) {
-    float dt = (currentTime - lastSensorTime) / 1000.0f;
-    lastSensorTime = currentTime;
-    if (dt <= 0.0f || dt > 0.5f) dt = 0.01f;
+  const unsigned long now = millis();
+  if (now - lastSensorTime >= SENSOR_INTERVAL_MS) {
+    float dt = (now - lastSensorTime) / 1000.0f;
+    lastSensorTime = now;
+    if (dt <= 0.0f || dt > 0.25f) dt = 0.005f;
 
-#if SPINEALIGN_DUAL_IMU
-    updateSensor(NECK_MPU_ADDRESS, neckPitchFilter, neckRollFilter, neckPitch, neckRoll,
-                 neckPitchZero, neckRollZero, neckAvailable, dt);
-    updateSensor(BACK_MPU_ADDRESS, backPitchFilter, backRollFilter, backPitch, backRoll,
-                 backPitchZero, backRollZero, backAvailable, dt);
-    neckAngle = sqrtf((neckPitch * neckPitch) + (neckRoll * neckRoll));
-#else
-    neckAvailable = false;
-    neckPitch = neckRoll = neckAngle = 0.0f;
-    updateSensor(NECK_MPU_ADDRESS, backPitchFilter, backRollFilter, backPitch, backRoll,
-                 backPitchZero, backRollZero, backAvailable, dt);
-#endif
-    backAngle = sqrtf((backPitch * backPitch) + (backRoll * backRoll));
+    if (dualImuActive) {
+      updateSensor(neckBus, neckCal, neckPitchFilter, neckRollFilter,
+                   neckPitch, neckRoll, neckAvailable, neckFailCount,
+                   lastNeckReinitAttempt, dt);
+      updateSensor(backBus, backCal, backPitchFilter, backRollFilter,
+                   backPitch, backRoll, backAvailable, backFailCount,
+                   lastBackReinitAttempt, dt);
+      neckAngle = clampAngle(sqrtf((neckPitch * neckPitch) + (neckRoll * neckRoll)));
+    } else {
+      neckAvailable = false;
+      neckPitch = neckRoll = neckAngle = 0.0f;
+      updateSensor(backBus, backCal, backPitchFilter, backRollFilter,
+                   backPitch, backRoll, backAvailable, backFailCount,
+                   lastBackReinitAttempt, dt);
+    }
+    backAngle = clampAngle(sqrtf((backPitch * backPitch) + (backRoll * backRoll)));
     updatePosture();
   }
 
-  if (currentTime - lastOLEDTime >= OLED_INTERVAL_MS) {
-    lastOLEDTime = currentTime;
-    updateOLED();
-  }
-
-  if (currentTime - lastSerialTime >= SERIAL_INTERVAL_MS) {
-    lastSerialTime = currentTime;
-    sendTelemetry();
+  if (now - lastTelemetryTime >= TELEMETRY_INTERVAL_MS) {
+    lastTelemetryTime = now;
+    broadcastTelemetry();
   }
 
   yield();

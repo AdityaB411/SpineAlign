@@ -2,12 +2,22 @@
   'use strict';
 
   const ALERT_THRESHOLD = 15;
-  const CHART_MAX_ANGLE = 30;
-  const HISTORY_LIMIT = 60;
+  const MAX_BAR_ANGLE = 30;
+  const WIFI_RECONNECT_DELAYS = [1500, 3000, 5000, 8000, 10000];
   const $ = (id) => document.getElementById(id);
 
+  const TRANSPORT_ICONS = {
+    ble: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11L12 22V2l5.5 4.5-11 11"/></svg>',
+    wifi: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>'
+  };
+
+  const TRANSPORT_LABELS = {
+    ble: { name: 'Bluetooth', connect: 'Connect Bluetooth', switchTo: 'Switch to Bluetooth', connected: 'Bluetooth connected', detail: 'Bluetooth Low Energy' },
+    wifi: { name: 'Wi-Fi', connect: 'Connect Wi-Fi', switchTo: 'Switch to Wi-Fi', connected: 'Wi-Fi connected', detail: 'Wi-Fi WebSocket' }
+  };
+
   const els = {
-    connectBtn: $('connectBtn'), connectBtnText: $('connectBtnText'), deviceConnectBtn: $('deviceConnectBtn'),
+    connectBtn: $('connectBtn'), connectBtnIcon: $('connectBtnIcon'), connectBtnText: $('connectBtnText'), deviceConnectBtn: $('deviceConnectBtn'),
     calibrateBtn: $('calibrateBtn'), topConnectionText: $('topConnectionText'), connectionPill: $('connectionPill'),
     sideDot: $('sideDot'), sideConnectionText: $('sideConnectionText'), deviceStatusIcon: $('deviceStatusIcon'),
     deviceStatusTitle: $('deviceStatusTitle'), deviceStatusSubtitle: $('deviceStatusSubtitle'), connectionType: $('connectionType'),
@@ -16,25 +26,191 @@
     statusCard: $('statusCard'), statusIcon: $('statusIcon'), statusTitle: $('statusTitle'), statusBadge: $('statusBadge'),
     statusDescription: $('statusDescription'), statusFootIcon: $('statusFootIcon'), statusFootText: $('statusFootText'),
     neckDeviceIndicator: $('neckDeviceIndicator'), backDeviceIndicator: $('backDeviceIndicator'), neckDeviceStatus: $('neckDeviceStatus'),
-    backDeviceStatus: $('backDeviceStatus'), neckDetailAngle: $('neckDetailAngle'), backDetailAngle: $('backDetailAngle'),
-    neckMeter: $('neckMeter'), backMeter: $('backMeter'), chartModeText: $('chartModeText'), chartEmpty: $('chartEmpty'), toast: $('toast'),
+    deviceNeckStatus: $('deviceNeckStatus'), backDeviceStatus: $('backDeviceStatus'), neckDetailAngle: $('neckDetailAngle'), backDetailAngle: $('backDetailAngle'),
+    neckMeter: $('neckMeter'), backMeter: $('backMeter'), toast: $('toast'),
     batteryCard: $('battery'), batteryPercent: $('batteryPercent'), batteryVoltage: $('batteryVoltage'), batteryState: $('chargerState'),
     batteryStatusPill: $('batteryStatusPill'), batteryProgress: $('batteryProgress'), batteryProgressTrack: $('batteryProgressTrack'),
     batteryGlyphFill: $('batteryGlyphFill'), batteryHint: $('batteryHint'), batteryMonitorState: $('batteryMonitorState'), chargerSignalState: $('chargerSignalState'), batteryLevelCaption: $('batteryLevelCaption'),
-    tabWifi: $('tabWifi'), tabUsb: $('tabUsb'), tabBle: $('tabBle'), wifiConfigPanel: $('wifiConfigPanel'), wifiHostInput: $('wifiHostInput'), wifiPortInput: $('wifiPortInput')
+    tabWifi: $('tabWifi'), tabBle: $('tabBle'),
+    headerTabWifi: $('headerTabWifi'), headerTabBle: $('headerTabBle'),
+    deviceCard: $('device'), wifiConfigPanel: $('wifiConfigPanel'),
+    wifiProtocolSelect: $('wifiProtocolSelect'), wifiHostInput: $('wifiHostInput'), wifiPortInput: $('wifiPortInput'),
+    wifiAutoReconnect: $('wifiAutoReconnect'), transportWarning: $('transportWarning')
   };
 
   const state = {
-    mode: 'demo', connected: false, port: null, reader: null, readTask: null, writer: null, keepReading: false,
-    selectedTransport: 'ble',
+    mode: 'demo', connected: false, connecting: false, port: null, reader: null, readTask: null, writer: null, keepReading: false,
+    selectedTransport: 'wifi',
+    activeTransport: null,
+    activeDeviceLabel: '',
+    reconnecting: false, reconnectAttempts: 0, reconnectTimer: null, manualDisconnect: false, autoReconnectWifi: true, lastWifiConfig: null,
     singleSensorMode: false,
     neck: 5.2, back: 8.7, neckPitch: 4.0, neckRoll: 0.8, neckTwist: 0.0, backPitch: 7.0, backRoll: -1.2, backTwist: 0.0,
     batteryVoltage: 3.87, batteryPercent: 78, batteryCharging: false, batteryFull: false, batteryAvailable: false,
     calibrationKnown: false, isCalibrated: false, firmwareAlert: false, firmwareAlertKnown: false,
     neckSensorOk: true, backSensorOk: true, linkStale: false, chargerStatusAvailable: false,
-    hasLiveReading: false, simulationSlouch: false, sampleCounter: 0, lastHistoryAt: 0,
-    history: [], toastTimer: null, animationTimer: null, freshnessTimer: null, lastDataAt: Date.now()
+    hasLiveReading: false, simulationSlouch: false, sampleCounter: 0, lastUiRenderAt: 0,
+    toastTimer: null, animationTimer: null, freshnessTimer: null, lastDataAt: Date.now()
   };
+
+  function safeStorageGet(key) {
+    try { return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null; } catch (_) { return null; }
+  }
+
+  function safeStorageSet(key, value) {
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, value); } catch (_) {}
+  }
+
+  function setNeckDeviceStatus(text) {
+    if (els.neckDeviceStatus) els.neckDeviceStatus.textContent = text;
+    if (els.deviceNeckStatus) els.deviceNeckStatus.textContent = text;
+  }
+
+  function isLocalHostname(hostname) {
+    const clean = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+    return clean === 'localhost' || clean === '127.0.0.1' || clean === '::1';
+  }
+
+  function buildWebSocketUrl(rawHost, rawPort, protocolPref = 'ws') {
+    const hostInput = String(rawHost || '').trim() || 'spinealign.local';
+    const portStr = String(rawPort ?? '').trim();
+    const defaultProto = protocolPref === 'wss' ? 'wss' : 'ws';
+
+    const validatePort = (p) => {
+      if (!p) return null;
+      if (!/^\d+$/.test(p)) throw new Error('Wi-Fi port must be a number between 1 and 65535.');
+      const n = Number(p);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) throw new Error('Wi-Fi port must be between 1 and 65535.');
+      return String(n);
+    };
+
+    const explicitPort = validatePort(portStr);
+
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(hostInput)) {
+      let parsed;
+      try {
+        parsed = new URL(hostInput);
+      } catch (_) {
+        throw new Error('Enter a valid Wi-Fi host, IP address, or WebSocket URL.');
+      }
+      let protocol = parsed.protocol.replace(/:$/, '').toLowerCase();
+      if (protocol === 'http') protocol = 'ws';
+      else if (protocol === 'https') protocol = 'wss';
+      if (protocol !== 'ws' && protocol !== 'wss') {
+        throw new Error('Unsupported Wi-Fi URL scheme. Use ws:// or wss://.');
+      }
+      if (!parsed.hostname) throw new Error('Enter a valid Wi-Fi host or IP address.');
+      const urlPort = parsed.port || (protocol === 'ws' ? (explicitPort || '81') : '');
+      const portPart = urlPort ? `:${urlPort}` : '';
+      const pathPart = parsed.pathname && parsed.pathname !== '/' ? `${parsed.pathname}${parsed.search || ''}` : '/';
+      return {
+        url: `${protocol}://${parsed.hostname}${portPart}${pathPart}`,
+        protocol,
+        host: parsed.hostname,
+        port: urlPort || (protocol === 'wss' ? '443' : '81')
+      };
+    }
+
+    if (/\s/.test(hostInput)) {
+      throw new Error('Wi-Fi host cannot contain spaces.');
+    }
+
+    let candidateHost = hostInput;
+    let candidatePort = explicitPort;
+    let candidatePath = '/';
+
+    const slashIndex = candidateHost.indexOf('/');
+    if (slashIndex >= 0) {
+      candidatePath = candidateHost.slice(slashIndex) || '/';
+      candidateHost = candidateHost.slice(0, slashIndex);
+    }
+
+    const ipv6Match = candidateHost.match(/^(\[[^\]]+\])(?::(\d+))?$/);
+    if (ipv6Match) {
+      candidateHost = ipv6Match[1];
+      if (ipv6Match[2]) candidatePort = validatePort(ipv6Match[2]);
+    } else if (candidateHost.includes(':')) {
+      const parts = candidateHost.split(':');
+      if (parts.length !== 2 || !parts[0]) {
+        throw new Error('Enter a valid Wi-Fi host or IP address.');
+      }
+      candidateHost = parts[0];
+      candidatePort = validatePort(parts[1]);
+    }
+
+    if (!candidateHost || !/^[a-zA-Z0-9._\-\[\]:]+$/.test(candidateHost)) {
+      throw new Error('Enter a valid Wi-Fi host or IP address (e.g. spinealign.local or 192.168.4.1).');
+    }
+
+    const finalPort = candidatePort || (defaultProto === 'wss' ? '443' : '81');
+    const omitPort = defaultProto === 'wss' && finalPort === '443';
+    return {
+      url: `${defaultProto}://${candidateHost}${omitPort ? '' : `:${finalPort}`}${candidatePath}`,
+      protocol: defaultProto,
+      host: candidateHost,
+      port: finalPort
+    };
+  }
+
+  function isMixedContentWs(url, pageProtocol = (typeof location !== 'undefined' ? location.protocol : 'http:')) {
+    if (pageProtocol !== 'https:' || !String(url).startsWith('ws://')) return false;
+    try {
+      const parsed = new URL(url);
+      return !isLocalHostname(parsed.hostname);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function getTransportAdvisory(transport) {
+    if (transport === 'ble') {
+      if (!window.isSecureContext) {
+        return 'Bluetooth requires HTTPS or localhost. Switch to the Wi-Fi tab or open this dashboard over HTTPS/localhost.';
+      }
+      if (!navigator.bluetooth) {
+        return 'Web Bluetooth is unavailable in this browser. Use Chrome or Edge for Bluetooth, or switch to the Wi-Fi tab.';
+      }
+      return '';
+    }
+    if (transport === 'wifi') {
+      try {
+        const built = buildWebSocketUrl(
+          els.wifiHostInput?.value,
+          els.wifiPortInput?.value,
+          els.wifiProtocolSelect?.value || 'ws'
+        );
+        if (isMixedContentWs(built.url)) {
+          return 'This page is on HTTPS, so browsers block unencrypted ws:// links. Choose wss://, open locally at http://localhost (supports both Wi-Fi & Bluetooth), or switch to Bluetooth.';
+        }
+      } catch (_) {
+        return '';
+      }
+      return '';
+    }
+    return '';
+  }
+
+  function updateTransportAdvisory() {
+    if (!els.transportWarning) return;
+    const message = getTransportAdvisory(state.selectedTransport);
+    els.transportWarning.textContent = message;
+    els.transportWarning.hidden = !message;
+  }
+
+  function updatePresetHighlights() {
+    const currentHost = (els.wifiHostInput?.value || '').trim().toLowerCase();
+    document.querySelectorAll('[data-wifi-preset]').forEach((btn) => {
+      const preset = (btn.getAttribute('data-wifi-preset') || '').toLowerCase();
+      btn.classList.toggle('active', currentHost === preset);
+    });
+  }
+
+  window.SpineAlignTransports = Object.freeze({
+    buildWebSocketUrl,
+    isMixedContentWs,
+    isLocalHostname,
+    getTransportAdvisory
+  });
 
   function angleString(value) {
     const absRounded = Math.abs(value) < 0.05 ? 0 : value;
@@ -50,7 +226,7 @@
   }
 
   function deviationFill(value) {
-    return `${Math.max(0, Math.min(Math.abs(value) / CHART_MAX_ANGLE * 100, 100))}%`;
+    return `${Math.max(0, Math.min(Math.abs(value) / MAX_BAR_ANGLE * 100, 100))}%`;
   }
 
   function setRangeStyle(label, fill, value, dot) {
@@ -62,7 +238,7 @@
     return outOfRange;
   }
 
-  function renderReadings() {
+  function renderReadings(skipModelUpdate = false) {
     const neckBad = setRangeStyle(els.neckRangeLabel, els.neckFill, state.neck, els.neckDot);
     const backBad = setRangeStyle(els.backRangeLabel, els.backFill, state.back, els.backDot);
     const live = state.mode === 'live';
@@ -133,11 +309,15 @@
       els.statusFootText.textContent = overallBad ? `Maximum deviation: ${worst.toFixed(1)}°` : 'You are in your target range';
     }
     els.statusFootText.parentElement.style.color = (overallBad || sensorFault || stale) ? '#b95f51' : uncalibrated || waiting ? '#9b7947' : '#587c5d';
-    updateModelOrientation();
+    if (!skipModelUpdate) updateModelOrientation();
   }
 
   function updateModelOrientation() {
     if (window.SpineAlign3D && typeof window.SpineAlign3D.updateTelemetry === 'function') {
+      const live = state.mode === 'live';
+      const fallbackAlert = state.singleSensorMode
+        ? Math.abs(state.back) >= ALERT_THRESHOLD
+        : (Math.abs(state.back) >= ALERT_THRESHOLD || Math.abs(state.neck) >= ALERT_THRESHOLD);
       window.SpineAlign3D.updateTelemetry({
         neckPitch: state.neckPitch,
         neckRoll: state.neckRoll,
@@ -146,7 +326,7 @@
         backRoll: state.backRoll,
         backTwist: state.backTwist ?? 0,
         mode: state.mode,
-        alert: state.firmwareAlert || (state.back > 15 || state.neck > 15),
+        alert: live && state.firmwareAlertKnown ? state.firmwareAlert : fallbackAlert,
         singleSensorMode: state.singleSensorMode,
         timestamp: performance.now()
       });
@@ -194,105 +374,114 @@
               : 'Battery percentage is estimated from voltage and should be calibrated for the actual cell.';
   }
 
-  function addHistorySample(force = false) {
-    const now = Date.now();
-    if (!force && now - state.lastHistoryAt < 850) return;
-    state.lastHistoryAt = now;
-    state.history.push({ t: now, neck: Math.abs(state.neck), back: Math.abs(state.back) });
-    if (state.history.length > HISTORY_LIMIT) state.history.shift();
-    renderChart();
+  function getTransportNote(transport) {
+    if (transport === 'wifi') {
+      return 'Connect to your device over Wi-Fi WebSockets (ws:// or wss://) on your local network or AP hotspot (192.168.4.1).';
+    }
+    return 'Pair your SpineAlign BLE device wirelessly in Chrome or Edge over HTTPS or localhost.';
   }
 
-  function renderChart() {
-    const canvas = $('angleChart');
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  function getActiveDeviceTitle() {
+    if (state.activeTransport === 'wifi') return state.activeDeviceLabel || 'Wi-Fi device';
+    if (state.activeTransport === 'ble') return state.activeDeviceLabel || 'Bluetooth device';
+    return 'Device';
+  }
 
-    const width = rect.width;
-    const height = rect.height;
-    const pad = { top: 14, right: 10, bottom: 26, left: 29 };
-    const plotW = width - pad.left - pad.right;
-    const plotH = height - pad.top - pad.bottom;
-    ctx.clearRect(0, 0, width, height);
-    if (state.history.length < 2) {
-      els.chartEmpty.hidden = false;
+  function updateConnectionControls() {
+    const live = state.mode === 'live';
+    const active = state.activeTransport;
+    const selected = state.selectedTransport;
+    const selectedMeta = TRANSPORT_LABELS[selected] || TRANSPORT_LABELS.ble;
+    const activeMeta = (active && TRANSPORT_LABELS[active]) || selectedMeta;
+    const iconTransport = live && active ? active : selected;
+
+    if (els.connectBtnIcon) {
+      els.connectBtnIcon.innerHTML = TRANSPORT_ICONS[iconTransport] || TRANSPORT_ICONS.ble;
+    }
+    if (els.deviceStatusIcon) {
+      els.deviceStatusIcon.innerHTML = TRANSPORT_ICONS[iconTransport] || TRANSPORT_ICONS.ble;
+    }
+
+    if (state.connecting) {
+      els.connectBtn.disabled = true;
+      els.deviceConnectBtn.disabled = true;
+      els.connectBtnText.textContent = 'Connecting…';
+      els.deviceConnectBtn.textContent = `Connecting ${selectedMeta.name}…`;
       return;
     }
-    els.chartEmpty.hidden = true;
 
-    ctx.font = '10px DM Sans, sans-serif';
-    ctx.textBaseline = 'middle';
-    [0, 10, 20, 30].forEach((tick) => {
-      const y = pad.top + plotH - (tick / CHART_MAX_ANGLE) * plotH;
-      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(width - pad.right, y);
-      ctx.strokeStyle = '#e3e8de'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = '#7f8a80'; ctx.textAlign = 'right'; ctx.fillText(String(tick), pad.left - 8, y);
-    });
+    els.connectBtn.disabled = false;
+    els.deviceConnectBtn.disabled = false;
 
-    const thresholdY = pad.top + plotH - (ALERT_THRESHOLD / CHART_MAX_ANGLE) * plotH;
-    ctx.save(); ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(pad.left, thresholdY); ctx.lineTo(width - pad.right, thresholdY);
-    ctx.strokeStyle = '#c59a66'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.restore();
-    ctx.fillStyle = '#a98250'; ctx.textAlign = 'right'; ctx.fillText('15°', width - pad.right, thresholdY - 8);
+    if (state.reconnecting) {
+      els.connectBtnText.textContent = 'Cancel reconnect';
+      els.deviceConnectBtn.textContent = selected !== 'wifi' ? selectedMeta.switchTo : 'Cancel reconnect';
+      return;
+    }
 
-    const allLines = [
-      { key: 'neck', color: '#c28f68', fill: 'rgba(194,143,104,.10)' },
-      { key: 'back', color: '#789d80', fill: 'rgba(120,157,128,.10)' }
-    ];
-    const lines = state.singleSensorMode ? allLines.filter((line) => line.key === 'back') : allLines;
-    lines.forEach((line) => {
-      const points = state.history.map((sample, index) => ({
-        x: pad.left + (index / Math.max(1, state.history.length - 1)) * plotW,
-        y: pad.top + plotH - (Math.min(sample[line.key], CHART_MAX_ANGLE) / CHART_MAX_ANGLE) * plotH
-      }));
-      ctx.beginPath();
-      points.forEach((point, index) => index === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y));
-      ctx.lineWidth = 2.1; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = line.color; ctx.stroke();
-      const final = points[points.length - 1];
-      ctx.beginPath(); ctx.arc(final.x, final.y, 3.2, 0, Math.PI * 2); ctx.fillStyle = line.color; ctx.fill();
-      ctx.beginPath(); ctx.arc(final.x, final.y, 6, 0, Math.PI * 2); ctx.strokeStyle = line.fill; ctx.lineWidth = 3; ctx.stroke();
-    });
+    if (live) {
+      els.connectBtnText.textContent = 'Disconnect';
+      els.deviceConnectBtn.textContent = selected !== active ? selectedMeta.switchTo : `Disconnect ${activeMeta.name}`;
+      return;
+    }
 
-    ctx.fillStyle = '#7f8a80'; ctx.textAlign = 'left';
-    ctx.fillText('Earlier', pad.left, height - 9);
-    ctx.textAlign = 'right'; ctx.fillText('Now', width - pad.right, height - 9);
+    els.connectBtnText.textContent = selectedMeta.connect;
+    els.deviceConnectBtn.textContent = selectedMeta.connect;
   }
 
   function setMode(mode) {
     state.mode = mode;
     const live = mode === 'live';
-    const isWifi = (state.port && state.port.transport === 'wifi') || state.selectedTransport === 'wifi';
-    const isBle = (state.port && state.port.transport === 'ble') || state.selectedTransport === 'ble';
+    const transport = live ? (state.activeTransport || state.selectedTransport) : state.selectedTransport;
+    const meta = TRANSPORT_LABELS[transport] || TRANSPORT_LABELS.ble;
+    const devTitle = getActiveDeviceTitle();
     if (window.SpineAlign3D && typeof window.SpineAlign3D.setMode === 'function') window.SpineAlign3D.setMode(mode);
     renderBattery();
-    els.topConnectionText.textContent = live ? (isWifi ? 'Wi-Fi connected' : isBle ? 'Bluetooth connected' : 'USB connected') : 'Demo mode';
-    els.connectionPill.classList.toggle('is-live', live);
-    els.sideDot.classList.toggle('is-live', live);
-    els.sideConnectionText.textContent = live ? (isWifi ? 'NodeMCU connected' : 'ESP32 connected') : 'Demo data active';
-    els.connectBtnText.textContent = live ? 'Disconnect' : (isBle ? 'Connect Bluetooth' : (isWifi ? 'Connect Wi-Fi' : 'Connect USB'));
-    els.deviceConnectBtn.textContent = live ? 'Disconnect device' : (isWifi ? 'Connect NodeMCU' : (isBle ? 'Connect Bluetooth' : 'Connect USB'));
-    els.deviceStatusTitle.textContent = live ? (state.hasLiveReading ? (isWifi ? 'NodeMCU connected' : 'ESP32 connected') : 'Waiting for sensor data') : 'Running in demo mode';
-    els.deviceStatusSubtitle.textContent = live
-      ? (isWifi ? 'Streaming neck/back pitch, roll, posture and battery telemetry over Wi-Fi WebSockets.' : 'Listening for neck/back pitch, roll, posture and battery telemetry.')
-      : 'Example values are shown so you can explore the dashboard.';
-    els.connectionType.textContent = live ? (isWifi ? (state.port?.url ? `Wi-Fi · ${state.port.url}` : 'Wi-Fi WebSocket · port 81') : isBle ? 'Bluetooth Low Energy' : 'USB serial · 115200 baud') : 'Demo mode';
-    els.chartModeText.textContent = live ? 'Live sensor readings' : 'Demo readings';
-    els.neckDeviceStatus.textContent = live ? (state.singleSensorMode ? 'Not fitted' : (state.hasLiveReading ? 'Reading' : 'Waiting')) : 'Simulated';
+
+    if (state.reconnecting) {
+      els.topConnectionText.textContent = `Reconnecting Wi-Fi (${state.reconnectAttempts}/${WIFI_RECONNECT_DELAYS.length})…`;
+      els.connectionPill.classList.remove('is-live');
+      els.connectionPill.classList.add('is-reconnecting');
+      els.sideDot.classList.remove('is-live');
+      els.sideConnectionText.textContent = 'Reconnecting Wi-Fi…';
+      els.deviceStatusTitle.textContent = 'Reconnecting over Wi-Fi…';
+      els.deviceStatusSubtitle.textContent = `Attempt ${state.reconnectAttempts} of ${WIFI_RECONNECT_DELAYS.length} to ${state.lastWifiConfig?.url || 'Wi-Fi device'}.`;
+      els.connectionType.textContent = state.lastWifiConfig?.url ? `Wi-Fi · ${state.lastWifiConfig.url}` : 'Wi-Fi WebSocket';
+    } else {
+      els.connectionPill.classList.remove('is-reconnecting');
+      els.topConnectionText.textContent = live ? meta.connected : 'Demo mode';
+      els.connectionPill.classList.toggle('is-live', live);
+      els.sideDot.classList.toggle('is-live', live);
+      els.sideConnectionText.textContent = live ? `${devTitle} connected` : 'Demo data active';
+      els.deviceStatusTitle.textContent = live ? (state.hasLiveReading ? `${devTitle} connected` : 'Waiting for sensor data') : 'Running in demo mode';
+      els.deviceStatusSubtitle.textContent = live
+        ? (transport === 'wifi'
+          ? 'Streaming neck/back pitch, roll, posture and battery telemetry over Wi-Fi WebSockets.'
+          : 'Streaming neck/back pitch, roll, posture and battery telemetry over Bluetooth Low Energy.')
+        : 'Example values are shown so you can explore the dashboard.';
+      els.connectionType.textContent = live
+        ? (transport === 'wifi'
+          ? (state.port?.url ? `Wi-Fi · ${state.port.url}` : 'Wi-Fi WebSocket')
+          : (state.activeDeviceLabel ? `Bluetooth · ${state.activeDeviceLabel}` : 'Bluetooth Low Energy'))
+        : 'Demo mode';
+    }
+
+    setNeckDeviceStatus(live ? (state.singleSensorMode ? 'Not fitted' : (state.hasLiveReading ? 'Reading' : 'Waiting')) : 'Simulated');
     els.backDeviceStatus.textContent = live ? (state.hasLiveReading ? 'Reading' : 'Waiting') : 'Simulated';
     els.neckDeviceIndicator.className = `tiny-indicator${live && !state.singleSensorMode && state.hasLiveReading ? ' good' : ''}`;
     els.backDeviceIndicator.className = `tiny-indicator${live && state.hasLiveReading ? ' good' : ''}`;
     els.neckDot.style.background = live && !state.hasLiveReading ? '#c59a66' : '#789d80';
     els.backDot.style.background = live && !state.hasLiveReading ? '#c59a66' : '#789d80';
-    els.calibrateBtn.disabled = live && !state.hasLiveReading;
+    els.calibrateBtn.disabled = state.reconnecting;
     const demoButton = $('simulateSlouchBtn');
-    if (demoButton) demoButton.hidden = live;
+    if (demoButton) demoButton.hidden = live || state.reconnecting;
     els.deviceNote.textContent = live
-      ? 'Calibration sends CALIBRATE to the firmware. Orientation depends on sensor mounting; battery fields appear only when the hardware monitor is enabled.'
-      : (isWifi ? 'Connect to the same Wi-Fi network (or NodeMCU hotspot at 192.168.4.1) and click Connect.' : isBle ? 'Pair your ESP32-WROOM via Bluetooth Low Energy in Chrome/Edge over HTTPS or localhost.' : 'For live data, connect your hardware over USB in a desktop Chromium browser.');
+      ? (state.selectedTransport !== state.activeTransport
+        ? `Currently connected via ${meta.name}. Click "${(TRANSPORT_LABELS[state.selectedTransport] || meta).switchTo}" to switch links seamlessly.`
+        : 'Calibration sends CALIBRATE to the firmware. You can switch between Wi-Fi and Bluetooth at any time.')
+      : getTransportNote(state.selectedTransport);
+    updateConnectionControls();
+    updateTransportAdvisory();
     renderReadings();
   }
 
@@ -301,6 +490,13 @@
     const parsed = window.SpineAlignTelemetry && window.SpineAlignTelemetry.parseLine(line);
     if (!parsed) return;
     const readField = (key) => Object.prototype.hasOwnProperty.call(parsed, key) ? parsed[key] : null;
+    const prevAlert = state.firmwareAlert;
+    const prevCal = state.isCalibrated;
+    const prevNeckOk = state.neckSensorOk;
+    const prevBackOk = state.backSensorOk;
+    const prevSingle = state.singleSensorMode;
+    const wasFirstLive = !state.hasLiveReading || state.linkStale;
+
     const deviceMode = readField('MODE');
     state.singleSensorMode = deviceMode === 1;
     const neck = readField('N'), back = readField('B');
@@ -325,28 +521,45 @@
       state.batteryFull = full === 1;
     }
     state.hasLiveReading = true;
-    state.lastDataAt = Date.now();
+    const nowMs = Date.now();
+    state.lastDataAt = nowMs;
     state.linkStale = false;
-    const isWifi = (state.port && state.port.transport === 'wifi') || state.selectedTransport === 'wifi';
-    const isBle = (state.port && state.port.transport === 'ble');
-    els.topConnectionText.textContent = isWifi ? 'Wi-Fi connected' : isBle ? 'Bluetooth connected' : 'USB connected';
-    els.connectionPill.classList.add('is-live');
-    els.sideDot.classList.add('is-live');
-    els.sideConnectionText.textContent = isWifi ? 'NodeMCU connected' : 'ESP32 connected';
-    if (els.deviceStatusTitle) {
-      const devName = isWifi ? 'NodeMCU' : 'ESP32';
-      els.deviceStatusTitle.textContent = state.calibrationKnown && !state.isCalibrated ? `${devName} connected · calibrate sensors` : `${devName} connected`;
+
+    // Push live orientation immediately to the 3D WebGL model at full sensor rate (25 Hz)
+    updateModelOrientation();
+
+    // Throttle DOM text/bar repaints to ~16 Hz unless a status flag changed
+    const stateChanged = wasFirstLive ||
+      prevAlert !== state.firmwareAlert ||
+      prevCal !== state.isCalibrated ||
+      prevNeckOk !== state.neckSensorOk ||
+      prevBackOk !== state.backSensorOk ||
+      prevSingle !== state.singleSensorMode;
+    if (stateChanged || nowMs - state.lastUiRenderAt >= 60) {
+      state.lastUiRenderAt = nowMs;
+      const active = state.activeTransport || state.port?.transport || 'ble';
+      const meta = TRANSPORT_LABELS[active] || TRANSPORT_LABELS.ble;
+      const devTitle = getActiveDeviceTitle();
+      els.topConnectionText.textContent = meta.connected;
+      els.connectionPill.classList.add('is-live');
+      els.connectionPill.classList.remove('is-reconnecting');
+      els.sideDot.classList.add('is-live');
+      els.sideConnectionText.textContent = `${devTitle} connected`;
+      if (els.deviceStatusTitle) {
+        els.deviceStatusTitle.textContent = state.calibrationKnown && !state.isCalibrated ? `${devTitle} connected · calibrate sensors` : `${devTitle} connected`;
+      }
+      els.calibrateBtn.disabled = false;
+      setNeckDeviceStatus(state.singleSensorMode ? 'Not fitted' : 'Reading');
+      els.backDeviceStatus.textContent = 'Reading';
+      els.neckDeviceIndicator.className = state.singleSensorMode ? 'tiny-indicator' : 'tiny-indicator good';
+      els.backDeviceIndicator.className = 'tiny-indicator good';
+      renderReadings(true);
+      renderBattery();
     }
-    els.neckDeviceStatus.textContent = state.singleSensorMode ? 'Not fitted' : 'Reading';
-    els.backDeviceStatus.textContent = 'Reading';
-    els.neckDeviceIndicator.className = state.singleSensorMode ? 'tiny-indicator' : 'tiny-indicator good';
-    els.backDeviceIndicator.className = 'tiny-indicator good';
-    renderReadings();
-    renderBattery();
-    if ((state.singleSensorMode ? state.backSensorOk : state.neckSensorOk && state.backSensorOk) && (!state.calibrationKnown || state.isCalibrated)) addHistorySample();
   }
 
   function handleSerialLine(line) {
+    if (!line) return;
     if (line === 'CALIBRATED') {
       state.calibrationKnown = true;
       state.isCalibrated = true;
@@ -361,25 +574,110 @@
       renderReadings();
       return;
     }
+    if (line === 'STATUS:CALIBRATED') {
+      state.calibrationKnown = true;
+      state.isCalibrated = true;
+      renderReadings();
+      return;
+    }
+    if (line === 'STATUS:UNCALIBRATED') {
+      state.calibrationKnown = true;
+      state.isCalibrated = false;
+      renderReadings();
+      return;
+    }
     updateFromLine(line);
   }
 
-  function createWebSocketPort(host, port) {
+  function cancelWifiReconnect() {
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
+    }
+    state.reconnecting = false;
+    state.reconnectAttempts = 0;
+  }
+
+  function scheduleWifiReconnect() {
+    if (!state.autoReconnectWifi || state.manualDisconnect || !state.lastWifiConfig) return false;
+    if (state.reconnectAttempts >= WIFI_RECONNECT_DELAYS.length) {
+      cancelWifiReconnect();
+      setMode('demo');
+      showToast('Wi-Fi reconnect failed after 5 attempts. Returned to demo mode.', true);
+      return false;
+    }
+    const delay = WIFI_RECONNECT_DELAYS[state.reconnectAttempts];
+    state.reconnectAttempts += 1;
+    state.reconnecting = true;
+    setMode('demo');
+    showToast(`Wi-Fi dropped. Reconnecting (${state.reconnectAttempts}/${WIFI_RECONNECT_DELAYS.length})…`, true);
+    state.reconnectTimer = setTimeout(() => {
+      state.reconnectTimer = null;
+      if (!state.reconnecting || state.manualDisconnect) return;
+      connectWebSocket({ isRetry: true, config: state.lastWifiConfig });
+    }, delay);
+    return true;
+  }
+
+  function beginLiveSession(port, transport, deviceLabel) {
+    cancelWifiReconnect();
+    state.manualDisconnect = false;
+    state.simulationSlouch = false;
+    const slouchButton = $('simulateSlouchBtn');
+    if (slouchButton) slouchButton.textContent = 'Simulate slouch';
+    state.port = port;
+    state.activeTransport = transport;
+    state.activeDeviceLabel = deviceLabel || '';
+    state.connected = true;
+    state.keepReading = true;
+    state.hasLiveReading = false;
+    state.linkStale = false;
+    state.lastDataAt = Date.now();
+    state.calibrationKnown = false;
+    state.isCalibrated = false;
+    state.firmwareAlertKnown = false;
+    state.neckSensorOk = false;
+    state.backSensorOk = false;
+    state.batteryAvailable = false;
+    state.chargerStatusAvailable = false;
+    setMode('live');
+    state.readTask = readSerialLoop(port);
+  }
+
+  function createWebSocketPort(host, port, protocolPref = 'ws') {
+    const built = buildWebSocketUrl(host, port, protocolPref);
     let ws = null;
     let controller = null;
-    const url = `ws://${host}:${port}/`;
-    return {
+    let closed = false;
+    let manualClose = false;
+    const url = built.url;
+
+    function closeController() {
+      if (controller && !closed) {
+        try { controller.close(); } catch (_) {}
+        closed = true;
+      }
+    }
+
+    const wsPort = {
       transport: 'wifi',
-      url: url,
+      url,
+      host: built.host,
+      port: built.port,
+      protocol: built.protocol,
       readable: new ReadableStream({
         start(c) { controller = c; },
-        cancel() { if (ws) ws.close(); }
+        cancel() {
+          manualClose = true;
+          if (ws) try { ws.close(); } catch (_) {}
+          closeController();
+        }
       }),
       writable: new WritableStream({
         write(chunk) {
-          if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('NodeMCU WebSocket is not connected.');
+          if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('Wi-Fi WebSocket is not connected.');
           const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
-          ws.send(text);
+          ws.send(text.trim());
         }
       }),
       async open() {
@@ -393,8 +691,9 @@
           const timeout = setTimeout(() => {
             if (!settled) {
               settled = true;
+              manualClose = true;
               try { ws.close(); } catch (_) {}
-              reject(new Error(`Connection to ${url} timed out. Ensure NodeMCU is powered on and reachable.`));
+              reject(new Error(`Connection to ${url} timed out. Ensure the device is powered on and reachable.`));
             }
           }, 8000);
 
@@ -410,188 +709,173 @@
             if (!settled) {
               settled = true;
               clearTimeout(timeout);
-              reject(new Error(`WebSocket error connecting to ${url}. Verify Wi-Fi network and IP address.`));
+              reject(new Error(`WebSocket error connecting to ${url}. Verify Wi-Fi network, protocol, and IP address.`));
             }
           };
 
           ws.onmessage = (event) => {
-            if (controller) {
+            if (controller && !closed) {
               const text = typeof event.data === 'string' ? event.data : '';
-              if (text) controller.enqueue(text.endsWith('\n') ? text : text + '\n');
+              if (text) controller.enqueue(text.endsWith('\n') ? text : `${text}\n`);
             }
           };
 
           ws.onclose = () => {
-            if (controller) {
-              try { controller.close(); } catch (_) {}
-            }
-            if (state.connected && state.port?.transport === 'wifi') {
-              disconnectSerial(false);
-              showToast('NodeMCU Wi-Fi connection closed.', true);
+            closeController();
+            if (!manualClose && state.connected && state.port === wsPort) {
+              handleUnexpectedWifiDrop();
             }
           };
         });
       },
       async close() {
+        manualClose = true;
         if (ws) {
           const socket = ws;
           ws = null;
           try { socket.close(); } catch (_) {}
         }
-        if (controller) {
-          try { controller.close(); } catch (_) {}
-          controller = null;
-        }
+        closeController();
       }
     };
+    return wsPort;
   }
 
-  async function connectWebSocket() {
-    const hostInput = els.wifiHostInput?.value?.trim() || 'spinealign.local';
-    const portInput = els.wifiPortInput?.value?.trim() || '81';
-    try {
-      localStorage.setItem('spinealign_wifi_host', hostInput);
-      localStorage.setItem('spinealign_wifi_port', portInput);
-    } catch (_) {}
+  async function handleUnexpectedWifiDrop() {
+    await disconnectSerial(false, { preserveReconnect: true });
+    if (!scheduleWifiReconnect()) {
+      showToast('Wi-Fi connection closed.', true);
+    }
+  }
 
-    const port = createWebSocketPort(hostInput, portInput);
+  async function connectWebSocket(options = {}) {
+    const isRetry = Boolean(options.isRetry);
+    let built;
     try {
-      showToast(`Connecting to NodeMCU at ws://${hostInput}:${portInput}…`);
-      await port.open();
-      state.simulationSlouch = false;
-      const slouchButton = $('simulateSlouchBtn');
-      if (slouchButton) slouchButton.textContent = 'Simulate slouch';
-      state.port = port;
-      state.connected = true;
-      state.keepReading = true;
-      state.hasLiveReading = false;
-      state.linkStale = false;
-      state.lastDataAt = Date.now();
-      state.calibrationKnown = false;
-      state.isCalibrated = false;
-      state.firmwareAlertKnown = false;
-      state.neckSensorOk = false;
-      state.backSensorOk = false;
-      state.batteryAvailable = false;
-      state.chargerStatusAvailable = false;
-      state.history = [];
-      state.lastHistoryAt = 0;
-      renderChart();
-      setMode('live');
-      showToast('Connected to NodeMCU over Wi-Fi. Waiting for telemetry…');
-      state.readTask = readSerialLoop(port);
+      const cfg = options.config || {
+        host: els.wifiHostInput?.value?.trim() || 'spinealign.local',
+        port: els.wifiPortInput?.value?.trim() || '81',
+        protocol: els.wifiProtocolSelect?.value || 'ws'
+      };
+      built = buildWebSocketUrl(cfg.host, cfg.port, cfg.protocol);
+      if (isMixedContentWs(built.url)) {
+        throw new Error('Blocked by HTTPS mixed-content policy: use wss://, run locally on http://localhost, or connect via Bluetooth.');
+      }
+      if (!isRetry) {
+        safeStorageSet('spinealign_wifi_host', built.host);
+        safeStorageSet('spinealign_wifi_port', built.port);
+        safeStorageSet('spinealign_wifi_protocol', built.protocol);
+      }
+      state.lastWifiConfig = { host: built.host, port: built.port, protocol: built.protocol, url: built.url };
     } catch (error) {
+      cancelWifiReconnect();
+      showToast(error && error.message ? error.message : 'Invalid Wi-Fi address.', true);
+      setMode('demo');
+      return false;
+    }
+
+    if (state.connecting) return false;
+    state.connecting = true;
+    state.manualDisconnect = false;
+    updateConnectionControls();
+
+    const port = createWebSocketPort(built.host, built.port, built.protocol);
+    try {
+      if (!isRetry) showToast(`Connecting over Wi-Fi to ${built.url}…`);
+      await port.open();
+      state.connecting = false;
+      beginLiveSession(port, 'wifi', built.host);
+      showToast(`Connected over Wi-Fi (${built.host}). Waiting for telemetry…`);
+      return true;
+    } catch (error) {
+      state.connecting = false;
       console.error('WebSocket connection error:', error);
-      showToast(error && error.message ? error.message : 'Could not connect to NodeMCU over Wi-Fi.', true);
+      if (isRetry && state.reconnecting && !state.manualDisconnect) {
+        scheduleWifiReconnect();
+      } else {
+        updateConnectionControls();
+        showToast(error && error.message ? error.message : 'Could not connect over Wi-Fi.', true);
+      }
+      return false;
     }
   }
 
   async function connectBle() {
-    if (window.SpineAlignBle && typeof window.SpineAlignBle.requestBleDevice === 'function') {
-      try {
-        const port = await window.SpineAlignBle.requestBleDevice();
-        state.simulationSlouch = false;
-        const slouchButton = $('simulateSlouchBtn');
-        if (slouchButton) slouchButton.textContent = 'Simulate slouch';
-        await port.open();
-        state.port = port;
-        state.connected = true;
-        state.keepReading = true;
-        state.hasLiveReading = false;
-        state.linkStale = false;
-        state.lastDataAt = Date.now();
-        state.calibrationKnown = false;
-        state.isCalibrated = false;
-        state.firmwareAlertKnown = false;
-        state.neckSensorOk = false;
-        state.backSensorOk = false;
-        state.batteryAvailable = false;
-        state.chargerStatusAvailable = false;
-        state.history = [];
-        state.lastHistoryAt = 0;
-        renderChart();
-        setMode('live');
-        showToast('Connected to Bluetooth device. Waiting for telemetry…');
-        state.readTask = readSerialLoop(port);
-      } catch (error) {
-        if (error && error.name === 'NotFoundError') return;
-        console.error('BLE connection error:', error);
-        showToast(`Could not connect via Bluetooth${error && error.message ? `: ${error.message}` : '.'}`, true);
-      }
-    } else {
-      await connectSerial();
+    if (!window.SpineAlignBle || typeof window.SpineAlignBle.requestBleDevice !== 'function') {
+      showToast('Bluetooth bridge failed to load. Refresh the page or connect over Wi-Fi.', true);
+      return false;
     }
+    if (state.connecting) return false;
+    cancelWifiReconnect();
+    state.connecting = true;
+    updateConnectionControls();
+
+    try {
+      const port = await window.SpineAlignBle.requestBleDevice();
+      await port.open();
+      port.addEventListener?.('disconnect', () => {
+        if (state.port === port && state.connected) {
+          disconnectSerial(false);
+          showToast('Bluetooth device disconnected.', true);
+        }
+      });
+      state.connecting = false;
+      beginLiveSession(port, 'ble', port.deviceName || 'SpineAlign BLE');
+      showToast(`Connected via Bluetooth (${port.deviceName || 'BLE'}). Waiting for telemetry…`);
+      return true;
+    } catch (error) {
+      state.connecting = false;
+      updateConnectionControls();
+      if (error && error.name === 'NotFoundError') return false;
+      console.error('BLE connection error:', error);
+      showToast(`Could not connect via Bluetooth${error && error.message ? `: ${error.message}` : '.'}`, true);
+      return false;
+    }
+  }
+
+  async function connectSelectedTransport() {
+    if (state.selectedTransport === 'wifi') return connectWebSocket();
+    return connectBle();
+  }
+
+  async function switchTransport(targetTransport) {
+    if (state.connecting) return;
+    selectTransport(targetTransport);
+    if (state.reconnecting) cancelWifiReconnect();
+    if (state.mode === 'live' || state.connected) {
+      await disconnectSerial(false);
+    }
+    await connectSelectedTransport();
   }
 
   function selectTransport(transport) {
-    state.selectedTransport = transport;
-    try { localStorage.setItem('spinealign_transport', transport); } catch (_) {}
-    if (els.tabWifi) {
-      els.tabWifi.classList.toggle('active', transport === 'wifi');
-      els.tabWifi.setAttribute('aria-selected', String(transport === 'wifi'));
-    }
-    if (els.tabUsb) {
-      els.tabUsb.classList.toggle('active', transport === 'usb');
-      els.tabUsb.setAttribute('aria-selected', String(transport === 'usb'));
-    }
-    if (els.tabBle) {
-      els.tabBle.classList.toggle('active', transport === 'ble');
-      els.tabBle.setAttribute('aria-selected', String(transport === 'ble'));
-    }
-    if (els.wifiConfigPanel) els.wifiConfigPanel.hidden = transport !== 'wifi';
-    if (state.mode !== 'live') {
-      if (transport === 'wifi') {
-        els.deviceConnectBtn.textContent = 'Connect NodeMCU';
-        els.deviceNote.textContent = 'Connect to the same Wi-Fi network (or NodeMCU hotspot at 192.168.4.1) and click Connect.';
-      } else if (transport === 'ble') {
-        els.deviceConnectBtn.textContent = 'Connect Bluetooth (ESP32)';
-        els.deviceNote.textContent = 'Pair your ESP32-WROOM via Bluetooth Low Energy in Chrome/Edge over HTTPS or localhost.';
-      } else {
-        els.deviceConnectBtn.textContent = 'Connect USB';
-        els.deviceNote.textContent = 'Connect your device via USB at 115200 baud in a desktop Chromium browser.';
-      }
-    }
-  }
+    const valid = transport === 'ble' ? 'ble' : 'wifi';
+    state.selectedTransport = valid;
+    safeStorageSet('spinealign_transport', valid);
+    const syncTab = (el, isSelected) => {
+      if (!el) return;
+      el.classList.toggle('active', isSelected);
+      el.setAttribute('aria-selected', String(isSelected));
+      el.tabIndex = isSelected ? 0 : -1;
+    };
+    syncTab(els.tabWifi, valid === 'wifi');
+    syncTab(els.tabBle, valid === 'ble');
+    syncTab(els.headerTabWifi, valid === 'wifi');
+    syncTab(els.headerTabBle, valid === 'ble');
+    if (els.wifiConfigPanel) els.wifiConfigPanel.hidden = valid !== 'wifi';
+    updatePresetHighlights();
+    updateTransportAdvisory();
 
-  async function connectSerial() {
-    if (!('serial' in navigator)) {
-      showToast('USB serial is not available in this browser. Open this dashboard in a desktop Chromium browser over HTTPS or localhost.', true);
-      return;
+    if (state.mode === 'live') {
+      const activeMeta = TRANSPORT_LABELS[state.activeTransport] || TRANSPORT_LABELS.ble;
+      const selectedMeta = TRANSPORT_LABELS[valid] || TRANSPORT_LABELS.ble;
+      els.deviceNote.textContent = valid !== state.activeTransport
+        ? `Currently connected via ${activeMeta.name}. Click "${selectedMeta.switchTo}" to switch links seamlessly.`
+        : 'Calibration sends CALIBRATE to the firmware. You can switch between Wi-Fi and Bluetooth at any time.';
+    } else {
+      els.deviceNote.textContent = getTransportNote(valid);
     }
-    if (!window.isSecureContext) {
-      showToast('Live USB connection needs HTTPS or localhost. Demo mode is still available here.', true);
-      return;
-    }
-    try {
-      const port = await navigator.serial.requestPort();
-      state.simulationSlouch = false;
-      const slouchButton = $('simulateSlouchBtn');
-      if (slouchButton) slouchButton.textContent = 'Simulate slouch';
-      await port.open({ baudRate: 115200 });
-      state.port = port;
-      state.connected = true;
-      state.keepReading = true;
-      state.hasLiveReading = false;
-      state.linkStale = false;
-      state.lastDataAt = Date.now();
-      state.calibrationKnown = false;
-      state.isCalibrated = false;
-      state.firmwareAlertKnown = false;
-      state.neckSensorOk = false;
-      state.backSensorOk = false;
-      state.batteryAvailable = false;
-      state.chargerStatusAvailable = false;
-      state.history = [];
-      state.lastHistoryAt = 0;
-      renderChart();
-      setMode('live');
-      showToast('Connected. Waiting for the ESP32 angle stream…');
-      state.readTask = readSerialLoop(port);
-    } catch (error) {
-      if (error && error.name === 'NotFoundError') return;
-      console.error('Serial connection error:', error);
-      showToast(`Could not connect to the device${error && error.message ? `: ${error.message}` : '.'}`, true);
-    }
+    updateConnectionControls();
   }
 
   async function readSerialLoop(port) {
@@ -619,12 +903,19 @@
         }
       }
     } catch (error) {
-      if (state.keepReading) {
-        console.error('Serial read error:', error);
-        showToast('The serial stream stopped. Check the cable and reopen the connection.', true);
+      if (state.keepReading && state.port === port) {
+        console.error('Stream read error:', error);
+        const label = state.activeTransport === 'wifi' ? 'Wi-Fi' : 'Bluetooth';
+        showToast(`The ${label} stream stopped unexpectedly.`, true);
       }
     } finally {
-      if (state.keepReading) await disconnectSerial(false);
+      if (state.keepReading && state.port === port) {
+        if (state.activeTransport === 'wifi') {
+          await handleUnexpectedWifiDrop();
+        } else {
+          await disconnectSerial(false);
+        }
+      }
     }
   }
 
@@ -638,11 +929,18 @@
     }
   }
 
-  async function disconnectSerial(showMessage = true) {
+  async function disconnectSerial(showMessage = true, options = {}) {
+    const preserveReconnect = Boolean(options.preserveReconnect);
+    if (!preserveReconnect) {
+      state.manualDisconnect = true;
+      cancelWifiReconnect();
+    }
     state.keepReading = false;
     state.singleSensorMode = false;
     document.body.classList.remove('single-sensor-mode');
     state.connected = false;
+    state.activeTransport = null;
+    state.activeDeviceLabel = '';
     state.hasLiveReading = false;
     state.linkStale = false;
     state.calibrationKnown = false;
@@ -662,9 +960,6 @@
     state.neckRoll = 0.8;
     state.backPitch = 7;
     state.backRoll = -1.2;
-    state.history = [];
-    state.lastHistoryAt = 0;
-    renderChart();
     const slouchButton = $('simulateSlouchBtn');
     if (slouchButton) slouchButton.textContent = 'Simulate slouch';
     const port = state.port;
@@ -684,29 +979,43 @@
     const stale = Date.now() - state.lastDataAt > 2500;
     if (stale !== state.linkStale) {
       state.linkStale = stale;
-      const isWifi = state.port && state.port.transport === 'wifi';
-      const isBle = state.port && state.port.transport === 'ble';
-      els.topConnectionText.textContent = stale ? 'No recent data' : (isWifi ? 'Wi-Fi connected' : isBle ? 'Bluetooth connected' : 'USB connected');
+      const active = state.activeTransport || state.port?.transport || 'ble';
+      const meta = TRANSPORT_LABELS[active] || TRANSPORT_LABELS.ble;
+      const devTitle = getActiveDeviceTitle();
+      els.topConnectionText.textContent = stale ? 'No recent data' : meta.connected;
       els.connectionPill.classList.toggle('is-live', !stale);
       els.sideDot.classList.toggle('is-live', !stale);
-      els.sideConnectionText.textContent = stale ? 'Telemetry stalled' : (isWifi ? 'NodeMCU connected' : 'ESP32 connected');
-      els.deviceStatusTitle.textContent = stale ? 'No recent telemetry' : (isWifi ? 'NodeMCU connected' : 'ESP32 connected');
+      els.sideConnectionText.textContent = stale ? 'Telemetry stalled' : `${devTitle} connected`;
+      els.deviceStatusTitle.textContent = stale ? 'No recent telemetry' : `${devTitle} connected`;
       renderReadings();
     }
   }
 
   async function toggleConnection() {
+    if (state.reconnecting) {
+      state.manualDisconnect = true;
+      cancelWifiReconnect();
+      setMode('demo');
+      showToast('Wi-Fi reconnect cancelled.');
+      return;
+    }
     if (state.mode === 'live') {
       await disconnectSerial();
     } else {
-      if (state.selectedTransport === 'wifi') {
-        await connectWebSocket();
-      } else if (state.selectedTransport === 'ble') {
-        await connectBle();
-      } else {
-        await connectSerial();
-      }
+      await connectSelectedTransport();
     }
+  }
+
+  async function handleDeviceConnectClick() {
+    if (state.mode === 'live' && state.selectedTransport !== state.activeTransport) {
+      await switchTransport(state.selectedTransport);
+      return;
+    }
+    if (state.reconnecting && state.selectedTransport !== 'wifi') {
+      await switchTransport(state.selectedTransport);
+      return;
+    }
+    await toggleConnection();
   }
 
   async function calibrate() {
@@ -723,10 +1032,8 @@
     state.neck = 0;
     state.back = 0;
     state.neckPitch = state.neckRoll = state.backPitch = state.backRoll = 0;
-    state.history = [];
     renderReadings();
-    addHistorySample(true);
-    showToast('Demo reference reset. Connect the ESP32 to calibrate real sensors.');
+    showToast('Demo reference reset. Connect a device via Wi-Fi or Bluetooth to calibrate real sensors.');
   }
 
   function updateDemo() {
@@ -747,7 +1054,6 @@
     state.backRoll = Math.cos(t / 6) * (state.simulationSlouch ? 4 : 2.4);
     state.backTwist = Math.sin(t / 8) * (state.simulationSlouch ? 5 : 1.8);
     renderReadings();
-    addHistorySample();
   }
 
   function toggleSlouch() {
@@ -762,7 +1068,6 @@
       state.backPitch = 7.6; state.backRoll = -2.0; state.backTwist = -1.2;
     }
     renderReadings();
-    addHistorySample(true);
     showToast(state.simulationSlouch ? 'Demo slouch enabled. Both angle readings are above the 15° threshold.' : 'Demo posture returned to the target range.');
     $('simulateSlouchBtn').textContent = state.simulationSlouch ? 'Return to good posture' : 'Simulate slouch';
   }
@@ -777,6 +1082,8 @@
     button.addEventListener('click', toggleSlouch);
     deviceActions.appendChild(button);
     window.addEventListener('beforeunload', () => {
+      state.manualDisconnect = true;
+      cancelWifiReconnect();
       state.keepReading = false;
       if (state.reader) state.reader.cancel().catch(() => {});
       if (state.port) state.port.close().catch(() => {});
@@ -787,46 +1094,129 @@
   }
 
   els.connectBtn.addEventListener('click', toggleConnection);
-  els.deviceConnectBtn.addEventListener('click', toggleConnection);
+  els.deviceConnectBtn.addEventListener('click', handleDeviceConnectClick);
   els.calibrateBtn.addEventListener('click', calibrate);
   $('simulateSlouchBtn')?.addEventListener('click', toggleSlouch);
-  window.addEventListener('resize', renderChart);
 
-  els.tabWifi?.addEventListener('click', () => selectTransport('wifi'));
-  els.tabUsb?.addEventListener('click', () => selectTransport('usb'));
-  els.tabBle?.addEventListener('click', () => selectTransport('ble'));
+  function bindTabGroup(items, revealDeviceOnWifi = false) {
+    const activeItems = items.filter((item) => Boolean(item.el));
+    activeItems.forEach(({ el, transport }, index) => {
+      el.addEventListener('click', () => {
+        selectTransport(transport);
+        if (revealDeviceOnWifi && transport === 'wifi' && els.deviceCard && typeof els.deviceCard.getBoundingClientRect === 'function') {
+          const rect = els.deviceCard.getBoundingClientRect();
+          if (rect.top > (window.innerHeight || 900) - 80 || rect.bottom < 0) {
+            els.deviceCard.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+          }
+        }
+      });
+      el.addEventListener('keydown', (event) => {
+        let nextIdx = -1;
+        if (event.key === 'ArrowRight') nextIdx = (index + 1) % activeItems.length;
+        else if (event.key === 'ArrowLeft') nextIdx = (index - 1 + activeItems.length) % activeItems.length;
+        else if (event.key === 'Home') nextIdx = 0;
+        else if (event.key === 'End') nextIdx = activeItems.length - 1;
+        if (nextIdx >= 0) {
+          event.preventDefault();
+          selectTransport(activeItems[nextIdx].transport);
+          activeItems[nextIdx].el.focus();
+        }
+      });
+    });
+  }
 
-  const queryTransport = new URLSearchParams(location.search).get('transport');
-  const storedTransport = (typeof localStorage !== 'undefined' && localStorage.getItem('spinealign_transport')) || null;
-  const initialTransport = queryTransport || storedTransport || 'ble';
-  selectTransport(initialTransport);
+  bindTabGroup([
+    { el: els.tabWifi, transport: 'wifi' },
+    { el: els.tabBle, transport: 'ble' }
+  ]);
+
+  bindTabGroup([
+    { el: els.headerTabWifi, transport: 'wifi' },
+    { el: els.headerTabBle, transport: 'ble' }
+  ], true);
+
+  document.querySelectorAll('[data-wifi-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const presetHost = btn.getAttribute('data-wifi-preset') || 'spinealign.local';
+      const presetPort = btn.getAttribute('data-wifi-port') || '81';
+      if (els.wifiHostInput) els.wifiHostInput.value = presetHost;
+      if (els.wifiPortInput) els.wifiPortInput.value = presetPort;
+      if (els.wifiProtocolSelect) els.wifiProtocolSelect.value = 'ws';
+      safeStorageSet('spinealign_wifi_host', presetHost);
+      safeStorageSet('spinealign_wifi_port', presetPort);
+      safeStorageSet('spinealign_wifi_protocol', 'ws');
+      updatePresetHighlights();
+      updateTransportAdvisory();
+    });
+  });
 
   if (els.wifiHostInput) {
-    const storedHost = (typeof localStorage !== 'undefined' && localStorage.getItem('spinealign_wifi_host')) || null;
-    const defaultHost = (location.hostname && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') ? location.hostname : 'spinealign.local';
+    const storedHost = safeStorageGet('spinealign_wifi_host');
+    const hostLooksLocalDevice = Boolean(location.hostname && (/^(\d{1,3}\.){3}\d{1,3}$/.test(location.hostname) || location.hostname.endsWith('.local')) && !isLocalHostname(location.hostname));
+    const defaultHost = hostLooksLocalDevice ? location.hostname : 'spinealign.local';
     els.wifiHostInput.value = storedHost || defaultHost;
+    els.wifiHostInput.addEventListener('input', () => {
+      updatePresetHighlights();
+      updateTransportAdvisory();
+    });
+    els.wifiHostInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && state.selectedTransport === 'wifi') {
+        event.preventDefault();
+        handleDeviceConnectClick();
+      }
+    });
   }
+
   if (els.wifiPortInput) {
-    const storedPort = (typeof localStorage !== 'undefined' && localStorage.getItem('spinealign_wifi_port')) || null;
+    const storedPort = safeStorageGet('spinealign_wifi_port');
     els.wifiPortInput.value = storedPort || '81';
+    els.wifiPortInput.addEventListener('input', updateTransportAdvisory);
+    els.wifiPortInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && state.selectedTransport === 'wifi') {
+        event.preventDefault();
+        handleDeviceConnectClick();
+      }
+    });
   }
+
+  if (els.wifiProtocolSelect) {
+    const storedProto = safeStorageGet('spinealign_wifi_protocol');
+    if (storedProto === 'ws' || storedProto === 'wss') {
+      els.wifiProtocolSelect.value = storedProto;
+    } else if (location.protocol === 'https:') {
+      els.wifiProtocolSelect.value = 'wss';
+    }
+    els.wifiProtocolSelect.addEventListener('change', () => {
+      const proto = els.wifiProtocolSelect.value;
+      if (els.wifiPortInput) {
+        if (proto === 'wss' && els.wifiPortInput.value === '81') els.wifiPortInput.value = '443';
+        else if (proto === 'ws' && els.wifiPortInput.value === '443') els.wifiPortInput.value = '81';
+      }
+      safeStorageSet('spinealign_wifi_protocol', proto);
+      updateTransportAdvisory();
+    });
+  }
+
+  if (els.wifiAutoReconnect) {
+    const storedAuto = safeStorageGet('spinealign_wifi_autoreconnect');
+    state.autoReconnectWifi = storedAuto === null ? true : storedAuto === '1';
+    els.wifiAutoReconnect.checked = state.autoReconnectWifi;
+    els.wifiAutoReconnect.addEventListener('change', () => {
+      state.autoReconnectWifi = Boolean(els.wifiAutoReconnect.checked);
+      safeStorageSet('spinealign_wifi_autoreconnect', state.autoReconnectWifi ? '1' : '0');
+    });
+  }
+
+  const queryTransport = new URLSearchParams(location.search).get('transport');
+  const storedTransport = safeStorageGet('spinealign_transport');
+  const initialTransport = queryTransport || storedTransport || 'wifi';
+  selectTransport(initialTransport);
 
   setMode('demo');
   renderBattery();
   renderReadings();
-  for (let i = 0; i < 12; i++) {
-    const n = state.neck + Math.sin(i / 2) * 1.3;
-    const b = state.back + Math.sin(i / 2 + .8) * 1.7;
-    state.history.push({ t: Date.now() - (12 - i) * 1000, neck: Math.abs(n), back: Math.abs(b) });
-  }
-  renderChart();
   // Add the demo-only slouch test without making the live UI pretend to be hardware.
   addSimulationControl();
   state.animationTimer = setInterval(updateDemo, 1000);
   state.freshnessTimer = setInterval(checkLiveFreshness, 500);
-  if ('serial' in navigator) {
-    navigator.serial.addEventListener('disconnect', (event) => {
-      if (state.port && event.target === state.port) disconnectSerial();
-    });
-  }
 })();

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f3f5ef">
-  <meta name="description" content="SpineAlign — Real-Time Wi-Fi Posture Companion with 3D Bioluminescent Particle Model">
+  <meta name="description" content="SpineAlign — Real-Time Wi-Fi &amp; Bluetooth Posture Companion with 3D Sculpted Dual-Color Human Spine Model">
   <title>SpineAlign — Posture Dashboard</title>
   <link rel="stylesheet" href="styles.css">
   <script type="importmap">
@@ -38,12 +38,24 @@
           <span class="mini-status-dot"></span>
           <span id="topConnectionText">Demo mode</span>
         </div>
+        <div class="header-transport-switch" id="headerTransportSwitch" role="tablist" aria-label="Quick Transport Switch">
+          <button class="header-transport-btn active" id="headerTabWifi" type="button" role="tab" aria-selected="true" data-transport="wifi">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>
+            <span>Wi-Fi</span>
+          </button>
+          <button class="header-transport-btn" id="headerTabBle" type="button" role="tab" aria-selected="false" data-transport="ble">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11L12 22V2l5.5 4.5-11 11"/></svg>
+            <span>Bluetooth</span>
+          </button>
+        </div>
       </div>
 
       <div class="header-actions">
         <button class="button button-primary" id="connectBtn" type="button">
-          <span class="button-symbol" aria-hidden="true">↗</span>
-          <span id="connectBtnText">Connect Bluetooth</span>
+          <span class="button-symbol" id="connectBtnIcon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>
+          </span>
+          <span id="connectBtnText">Connect Wi-Fi</span>
         </button>
         <button class="button button-secondary" id="calibrateBtn" type="button">
           Calibrate posture
@@ -154,7 +166,7 @@
           <div class="card-head 3d-card-head">
             <div>
               <span class="card-eyebrow">3D LIVE ORIENTATION POSTURE</span>
-              <h2>Interactive Human Particle Model</h2>
+              <h2>Interactive 3D Human Spine Model</h2>
             </div>
             <div class="head-pills">
               <span class="model-status-pill" id="modelStatusPill">
@@ -167,25 +179,33 @@
 
           <!-- 3D Viewport Stage -->
           <div class="canvas-stage" id="modelStage">
-            <canvas id="posture3dCanvas" aria-label="Interactive bioluminescent 3D particle human model showing torso and neck orientation"></canvas>
+            <canvas id="posture3dCanvas" aria-label="Interactive translucent 3D human upper-body model with glowing cyan thoracic spine and amber cervical spine responding to live sensors"></canvas>
             
             <div class="model-loader" id="modelLoading">
               <span class="model-spinner"></span>
-              <span id="modelLoadingText">Initializing 3D bioluminescent particles…</span>
+              <span id="modelLoadingText">Initializing 3D sculpted posture model…</span>
             </div>
 
             <!-- Floating Kinematic Pivot Overlay Tags -->
             <div class="joint-tag joint-tag-neck model-label-neck">
               <span class="joint-dot amber"></span>
-              <span>NECK IMU · Cervical Joint</span>
+              <span>NECK IMU · Cervical Spine</span>
             </div>
             <div class="joint-tag joint-tag-back model-label-back">
               <span class="joint-dot teal"></span>
-              <span>BACK IMU · Lumbar Pivot</span>
+              <span>BACK IMU · Thoracic Spine</span>
+            </div>
+
+            <!-- Camera View Preset Pills -->
+            <div class="camera-presets" role="group" aria-label="3D camera view presets">
+              <button class="camera-preset-btn active" type="button" data-camera-preset="threeQuarter" aria-pressed="true">3/4</button>
+              <button class="camera-preset-btn" type="button" data-camera-preset="front" aria-pressed="false">Front</button>
+              <button class="camera-preset-btn" type="button" data-camera-preset="side" aria-pressed="false">Side</button>
+              <button class="camera-preset-btn" type="button" data-camera-preset="back" aria-pressed="false">Back</button>
             </div>
 
             <div class="stage-footer-hint">
-              <span>Drag to rotate 360° · Scroll to zoom · Real-time dual-joint kinematics</span>
+              <span>Drag to rotate 360° · Scroll to zoom · Segmented dual-IMU spine kinematics</span>
             </div>
           </div>
 
@@ -218,44 +238,23 @@
 
           <div class="model-note" id="modelDataNote">
             <span class="model-note-icon">i</span>
-            <p>Bioluminescent model: Glowing teal torso tilts with back sensor; glowing amber head articulates with neck sensor.</p>
-          </div>
-        </article>
-
-        <!-- Angle Deviation History Chart -->
-        <article class="card trend-card">
-          <div class="card-head">
-            <div>
-              <span class="card-eyebrow">POSTURE TREND</span>
-              <h3>Angle History (Last 60s)</h3>
-            </div>
-            <div class="chart-legend">
-              <span><i class="legend-dot neck-legend"></i>Neck</span>
-              <span><i class="legend-dot back-legend"></i>Back</span>
-              <span class="threshold-legend-item">Alert Threshold <strong>15°</strong></span>
-            </div>
-          </div>
-          <div class="chart-wrap">
-            <canvas id="angleChart" role="img" aria-label="Recent neck and back angle deviation history chart"></canvas>
-            <div class="chart-empty" id="chartEmpty" hidden>Waiting for readings…</div>
-          </div>
-          <div class="chart-footer">
-            <span><span class="footer-live-dot"></span><span id="chartModeText">Live sensor readings</span></span>
-            <span>Real-time Kalman filtered deviation</span>
+            <p>Sculpted dual-color spine model: Glowing cyan torso and thoracic vertebrae curve with the back sensor; warm amber cervical spine and head follow the neck sensor.</p>
           </div>
         </article>
       </section>
 
-      <!-- Right Column: Device Connection & Test Controls -->
+      <!-- Right Column: Wireless Device Connection & Power -->
       <aside class="col-right">
-        <!-- Hardware & Wi-Fi Connection Card -->
+        <!-- Wireless Connection Card -->
         <article class="card device-card" id="device">
           <div class="card-head">
             <div>
-              <span class="card-eyebrow">HARDWARE LINK</span>
+              <span class="card-eyebrow">WIRELESS LINK</span>
               <h3>Device Connection</h3>
             </div>
-            <span class="device-status-icon" id="deviceStatusIcon">⌁</span>
+            <span class="device-status-icon" id="deviceStatusIcon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11L12 22V2l5.5 4.5-11 11"/></svg>
+            </span>
           </div>
 
           <div class="device-status-row">
@@ -267,22 +266,47 @@
 
           <!-- Transport Selector Tabs -->
           <div class="transport-selector" role="tablist" aria-label="Connection Transport">
-            <button class="transport-tab active" id="tabBle" type="button" role="tab" aria-selected="true" data-transport="ble">Bluetooth (ESP32)</button>
-            <button class="transport-tab" id="tabUsb" type="button" role="tab" aria-selected="false" data-transport="usb">USB Serial</button>
-            <button class="transport-tab" id="tabWifi" type="button" role="tab" aria-selected="false" data-transport="wifi">Wi-Fi (NodeMCU)</button>
+            <button class="transport-tab active" id="tabWifi" type="button" role="tab" aria-selected="true" aria-controls="wifiConfigPanel" data-transport="wifi">
+              <svg class="tab-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>
+              <span>Wi-Fi</span>
+            </button>
+            <button class="transport-tab" id="tabBle" type="button" role="tab" aria-selected="false" data-transport="ble">
+              <svg class="tab-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11L12 22V2l5.5 4.5-11 11"/></svg>
+              <span>Bluetooth</span>
+            </button>
           </div>
 
-          <!-- Wi-Fi NodeMCU Configuration Panel -->
-          <div class="wifi-config-panel" id="wifiConfigPanel" hidden>
-            <div class="wifi-input-group">
-              <label for="wifiHostInput" class="wifi-label">NodeMCU IP / Host</label>
-              <input type="text" id="wifiHostInput" class="wifi-input" placeholder="spinealign.local or 192.168.4.1" value="spinealign.local" spellcheck="false" autocomplete="off">
+          <!-- Wi-Fi WebSocket Configuration Panel -->
+          <div class="wifi-config-panel" id="wifiConfigPanel">
+            <div class="wifi-presets" role="group" aria-label="Wi-Fi host presets">
+              <button class="wifi-preset-btn" type="button" data-wifi-preset="spinealign.local" data-wifi-port="81">spinealign.local</button>
+              <button class="wifi-preset-btn" type="button" data-wifi-preset="192.168.4.1" data-wifi-port="81">192.168.4.1 (AP)</button>
             </div>
-            <div class="wifi-port-group">
-              <label for="wifiPortInput" class="wifi-label">Port</label>
-              <input type="number" id="wifiPortInput" class="wifi-input wifi-port" placeholder="81" value="81" min="1" max="65535">
+            <div class="wifi-fields-row">
+              <div class="wifi-protocol-group">
+                <label for="wifiProtocolSelect" class="wifi-label">Scheme</label>
+                <select id="wifiProtocolSelect" class="wifi-input wifi-select" aria-label="WebSocket protocol">
+                  <option value="ws">ws://</option>
+                  <option value="wss">wss://</option>
+                </select>
+              </div>
+              <div class="wifi-input-group">
+                <label for="wifiHostInput" class="wifi-label">Device IP / Host</label>
+                <input type="text" id="wifiHostInput" class="wifi-input" placeholder="spinealign.local or 192.168.4.1" value="spinealign.local" spellcheck="false" autocomplete="off">
+              </div>
+              <div class="wifi-port-group">
+                <label for="wifiPortInput" class="wifi-label">Port</label>
+                <input type="number" id="wifiPortInput" class="wifi-input wifi-port" placeholder="81" value="81" min="1" max="65535">
+              </div>
             </div>
+            <label class="wifi-reconnect-row" for="wifiAutoReconnect">
+              <input type="checkbox" id="wifiAutoReconnect" checked>
+              <span>Auto-reconnect if Wi-Fi drops</span>
+            </label>
           </div>
+
+          <!-- Contextual Transport Compatibility Advisory -->
+          <div class="transport-warning" id="transportWarning" role="status" hidden></div>
 
           <div class="device-info-list">
             <div class="device-detail-row">
@@ -291,15 +315,15 @@
             </div>
             <div class="device-detail-row neck-device-row">
               <span>Neck IMU</span>
-              <span class="detail-value"><span id="neckDeviceStatus">Simulated</span></span>
+              <span class="detail-value"><span id="deviceNeckStatus">Simulated</span></span>
             </div>
           </div>
 
           <div class="device-actions">
-            <button class="button button-primary button-wide" id="deviceConnectBtn" type="button">Connect Bluetooth</button>
+            <button class="button button-primary button-wide" id="deviceConnectBtn" type="button">Connect Wi-Fi</button>
           </div>
 
-          <p class="device-note" id="deviceNote">Pair your ESP32-WROOM via Bluetooth Low Energy in a Web Bluetooth supported browser (Chrome, Edge).</p>
+          <p class="device-note" id="deviceNote">Connect wirelessly via Wi-Fi WebSockets (NodeMCU) or Bluetooth Low Energy.</p>
 
           <!-- Hidden anchors preserved for script compatibility -->
           <div hidden>
@@ -311,7 +335,7 @@
         <!-- Battery & Power Card (Optional Telemetry) -->
         <article class="card battery-card" id="battery">
           <div class="card-head">
-            <span class="card-eyebrow">BATTERY & POWER</span>
+            <span class="card-eyebrow">BATTERY &amp; POWER</span>
             <span class="battery-status-pill unknown" id="batteryStatusPill">Preview</span>
           </div>
           <div class="battery-metric-row">
@@ -337,56 +361,6 @@
             <span id="batteryMonitorState">Demo values</span>
             <span id="chargerSignalState">Preview only</span>
             <span id="batteryLevelCaption">Battery level</span>
-          </div>
-        </article>
-
-        <!-- Interactive Movement Testing Controls (Demo Mode) -->
-        <article class="card controls-card" id="modelDemoControls">
-          <div class="card-head">
-            <div>
-              <span class="card-eyebrow">TEST PREVIEW</span>
-              <h3>Manual Movement Sliders</h3>
-            </div>
-            <button class="model-reset-button" id="modelResetBtn" type="button">Reset</button>
-          </div>
-          <p class="controls-subtitle">Test forward and sideways lean before live hardware connects.</p>
-
-          <div class="slider-group">
-            <label class="orientation-control" for="demoBackPitch">
-              <span>Back · Forward / Back Bend</span>
-              <output id="demoBackPitchValue">0°</output>
-            </label>
-            <input id="demoBackPitch" class="orientation-slider back-slider" type="range" min="-30" max="30" step="1" value="0">
-
-            <label class="orientation-control" for="demoBackRoll">
-              <span>Back · Sideways Lean</span>
-              <output id="demoBackRollValue">0°</output>
-            </label>
-            <input id="demoBackRoll" class="orientation-slider back-slider" type="range" min="-25" max="25" step="1" value="0">
-
-            <label class="orientation-control" for="demoBackTwist">
-              <span>Back · Sideways Twist</span>
-              <output id="demoBackTwistValue">0°</output>
-            </label>
-            <input id="demoBackTwist" class="orientation-slider back-slider" type="range" min="-30" max="30" step="1" value="0">
-
-            <label class="orientation-control" for="demoNeckPitch">
-              <span>Neck · Forward / Back Bend</span>
-              <output id="demoNeckPitchValue">0°</output>
-            </label>
-            <input id="demoNeckPitch" class="orientation-slider neck-slider" type="range" min="-35" max="35" step="1" value="0">
-
-            <label class="orientation-control" for="demoNeckRoll">
-              <span>Neck · Sideways Tilt</span>
-              <output id="demoNeckRollValue">0°</output>
-            </label>
-            <input id="demoNeckRoll" class="orientation-slider neck-slider" type="range" min="-25" max="25" step="1" value="0">
-
-            <label class="orientation-control" for="demoNeckTwist">
-              <span>Neck · Head Turn / Twist</span>
-              <output id="demoNeckTwistValue">0°</output>
-            </label>
-            <input id="demoNeckTwist" class="orientation-slider neck-slider" type="range" min="-35" max="35" step="1" value="0">
           </div>
         </article>
       </aside>

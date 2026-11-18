@@ -26,7 +26,7 @@ test('orientation3d.js enforces pure 1:1 mathematical angular fidelity without f
   assert.doesNotMatch(code, /DEG\s*\*\s*0\.90/);
 });
 
-test('orientation3d.js features dual-color bioluminescent materials with dedicated cervical core', () => {
+test('orientation3d.js features dual-color sculpted translucent human shell with segmented glowing spine', () => {
   const code = read('orientation3d.js');
 
   // BASE_COLORS should include distinct torso, spine, neck, cervical, head, and alert entries
@@ -38,8 +38,13 @@ test('orientation3d.js features dual-color bioluminescent materials with dedicat
   assert.match(code, /head:\s*0xf59e0b/);
   assert.match(code, /alert:\s*0xf43f5e/);
 
-  // Cervical spine articulates with head group
-  assert.match(code, /createCloud\(cervicalPoints,\s*head,\s*cervicalMat,\s*NECK_PIVOT\);/);
+  // Sculpted SkinnedMesh human upper-body with smooth segmented spinal bone chain & quaternion slerp
+  assert.match(code, /new THREE\.SkinnedMesh\(buildSculptedTorsoNeckGeometry\(\)/);
+  assert.match(code, /new THREE\.SkinnedMesh\(buildSculptedHeadGeometry\(\)/);
+  assert.match(code, /boneWorldQuats\[i\]\.copy\(qBackWorld\)\.slerp\(qNeckWorld,\s*def\.neckT\)/);
+  assert.match(code, /boneWorldQuats\[i\]\.copy\(qIdentity\)\.slerp\(qBackWorld,\s*def\.backT\)/);
+  assert.match(code, /cervicalSpineMat/);
+  assert.match(code, /lumbarSpineMat/);
 });
 
 test('analytical 2nd-order critically damped harmonic oscillator guarantees zero overshoot and C1 continuity', () => {
@@ -95,10 +100,7 @@ test('signal gap detection triggers holding after 2.5s and soft relaxation after
   assert.match(code, /target\[k\]\s*\+=\s*\(0\s*-\s*target\[k\]\)\s*\*\s*drift/);
 });
 
-test('ESP32-WROOM firmware streams telemetry at 10 Hz (SERIAL_INTERVAL_MS = 100)', () => {
-  const rootFw = read('SpineAlign.ino');
-  const wroomFw = read('firmware/SpineAlign_ESP32WROOM/SpineAlign_ESP32WROOM.ino');
-
-  assert.match(rootFw, /const unsigned long SERIAL_INTERVAL_MS\s*=\s*100;/);
-  assert.match(wroomFw, /const unsigned long SERIAL_INTERVAL_MS\s*=\s*100;/);
+test('NodeMCU firmware streams telemetry at 25 Hz (TELEMETRY_INTERVAL_MS = 40)', () => {
+  const nodemcuFw = read('firmware/SpineAlign_NodeMCU/SpineAlign_NodeMCU.ino');
+  assert.match(nodemcuFw, /const unsigned long TELEMETRY_INTERVAL_MS\s*=\s*40;/);
 });

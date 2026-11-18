@@ -1,86 +1,57 @@
 # SpineAlign
 
-SpineAlign is a wearable posture-monitoring system designed for the **ESP32-WROOM** module with Bluetooth Low Energy (BLE), coupled with a real-time browser dashboard featuring 3-axis bioluminescent particle human skeleton kinematics (bending and sideways twisting), Kalman-filtered angle tracking, and automated slouch alert feedback.
+SpineAlign is a wearable posture-monitoring system powered by **NodeMCU ESP8266** streaming real-time telemetry over **Wi-Fi WebSockets (25 Hz)**, paired with a real-time 3D human spine browser dashboard supporting both **Wi-Fi** (default) and **Bluetooth (BLE)** with Kalman-filtered angle tracking and slouch alert feedback.
 
 ---
 
 ## Architecture & Directory Structure
 
-- [SpineAlign.ino](file:///e:/SpineAlign/SpineAlign.ino): Direct-flash ESP32-WROOM / ESP32 DevKit Bluetooth (BLE) sketch for Arduino IDE.
-- `firmware/SpineAlign_ESP32WROOM/`: Dedicated ESP32-WROOM firmware package with PlatformIO configuration (`board = esp32dev`).
-- `firmware/SpineAlign_NodeMCU/`: Legacy NodeMCU ESP8266 Wi-Fi firmware with WebSocket streaming.
-- `firmware/SpineAlign_ESP32CAM/`: Legacy ESP32-CAM wireless firmware with custom OTA partition tables.
-- `index.html`, `styles.css`, `app.js`, `orientation3d.js`: Dashboard with 3D human particle skeleton, dual-joint kinematics, and multi-transport selector.
+- `firmware/SpineAlign_NodeMCU/`: NodeMCU ESP8266 Wi-Fi firmware (`SpineAlign_NodeMCU.ino`, `platformio.ini`, `config.example.h`, wiring guide).
+- `index.html`, `styles.css`, `app.js`, `orientation3d.js`: Real-time dashboard with interactive 3D sculpted human spine model, dual-joint kinematics, and Wi-Fi / Bluetooth connection switcher.
 - `ble-serial-bridge.js`, `telemetry-protocol.js`: Web Bluetooth bridge and strict shared telemetry parser.
 - `tests/`: Automated unit and integration test suite (`npm test`).
-- `docs/`: Setup guide, research paper overview, hardware pinouts, and system design specifications.
+- `docs/`: Dashboard setup guide and project/research documentation.
 
 ---
 
-## ESP32-WROOM (Bluetooth Low Energy — Primary)
+## NodeMCU ESP8266 Hardware Pinout
 
-The primary physical configuration targets the standard **ESP32-WROOM / ESP32 DevKit v1** board streaming real-time telemetry over Bluetooth Low Energy (BLE).
+Both MPU6050 sensors use separate, boot-safe `D` pins so neither sensor requires an `AD0 → 3V3` jumper:
 
-### Standard ESP32-WROOM Pinout
-| Pin | ESP32-WROOM GPIO | Connected Peripheral |
-| :--- | :--- | :--- |
-| **SDA** | `GPIO 21` | MPU6050 I²C Data & SSD1306 OLED SDA |
-| **SCL** | `GPIO 22` | MPU6050 I²C Clock & SSD1306 OLED SCL |
-| **Alert** | `GPIO 18` | Posture buzzer / LED driver (active HIGH) |
-| **Calibrate** | `GPIO 0` | Onboard **BOOT** button (active LOW, momentary zero calibration) |
-| **Status LED** | `GPIO 2` | Onboard Blue LED (Blink = Adv, Solid ON = Connected, Flash = Calibrated) |
-| **Battery ADC** | `GPIO 34` | Optional battery voltage divider (ADC1 channel) |
-
-### Bluetooth Specifications
-- **Device Name**: `SpineAlign-ESP32`
-- **Service UUID**: `67b7a001-9b7c-4eb7-a1a8-6b7f51a0a101`
-- **Telemetry Characteristic UUID**: `67b7a002-9b7c-4eb7-a1a8-6b7f51a0a101`
-- **Capabilities**: Telemetry notification stream (10 Hz, 100 ms) & incoming calibration command (`CALIBRATE`).
-
-### Quick Flash Instructions (Arduino IDE)
-1. Open [SpineAlign.ino](file:///e:/SpineAlign/SpineAlign.ino) in Arduino IDE.
-2. Select Board: **ESP32 Dev Module** and choose your COM port.
-3. Install `Adafruit SSD1306` and `Adafruit GFX Library` via Library Manager.
-4. Click **Upload**.
-5. Open the dashboard at `http://localhost:8000`, select **Bluetooth (ESP32)**, and click **Connect Bluetooth**.
+| NodeMCU Pin | GPIO | Function | Connected Peripheral |
+| :--- | :--- | :--- | :--- |
+| **D2** | `GPIO 4` | MPU #1 (Neck) SDA | Neck MPU6050 SDA *(or Single IMU SDA)* |
+| **D1** | `GPIO 5` | MPU #1 (Neck) SCL | Neck MPU6050 SCL *(or Single IMU SCL)* |
+| **D6** | `GPIO 12` | MPU #2 (Back) SDA | Back MPU6050 SDA *(or Single IMU SDA)* |
+| **D7** | `GPIO 13` | MPU #2 (Back) SCL | Back MPU6050 SCL *(or Single IMU SCL)* |
+| **D5** | `GPIO 14` | Alert Buzzer / LED | Active buzzer `(+)` or alert LED (`-` to `GND`) |
+| **D3** | `GPIO 0` | Calibrate Button | Push-button to `GND` (or onboard **FLASH** button) |
+| **A0** | `ADC0` | Battery Sense (Opt) | Voltage divider from 1S Li-ion battery `(+)` |
+| **3V3 / GND** | Power | Supply | MPU6050 `VCC` / `GND` and buzzer `(-)` |
 
 ---
 
-## NodeMCU ESP8266 (Wi-Fi WebSockets)
+## Quick Start
 
-Located in `firmware/SpineAlign_NodeMCU/`.
+### 1. Flash NodeMCU Firmware
+1. Open `firmware/SpineAlign_NodeMCU/SpineAlign_NodeMCU.ino` in Arduino IDE (or run `pio run -d firmware/SpineAlign_NodeMCU`).
+2. Select Board: **NodeMCU 1.0 (ESP-12E Module)** and install `WebSockets` by Markus Sattler (`links2004`).
+3. Optionally copy `config.example.h` to `config.h` with your 2.4 GHz Wi-Fi credentials; otherwise NodeMCU boots into Access Point **`SpineAlign-NodeMCU`** at `192.168.4.1`.
+4. Upload to the NodeMCU.
 
-### Pinout
-- **D2 (GPIO4)**: SDA (MPU6050 & SSD1306 OLED)
-- **D1 (GPIO5)**: SCL (MPU6050 & SSD1306 OLED)
-- **D5 (GPIO14)**: Alert Buzzer / LED
-- **D3 (GPIO0)**: Physical calibration button (active LOW)
-
-### Wi-Fi & WebSockets
-1. Copy `firmware/SpineAlign_NodeMCU/config.example.h` to `config.h` and configure 2.4 GHz Wi-Fi credentials.
-2. If unconfigured, the NodeMCU automatically starts an Access Point **`SpineAlign-NodeMCU`** at `192.168.4.1`.
-3. In the dashboard, switch to **Wi-Fi (NodeMCU)**, enter `spinealign.local` (or `192.168.4.1`), and click **Connect NodeMCU**.
-
----
-
-## Dashboard & Visualizer
-
-Start local server:
+### 2. Run the Dashboard Locally
 ```sh
 python -m http.server 8000
 ```
-Open `http://localhost:8000` in Google Chrome or Microsoft Edge.
-- **Hero 3D Visualizer**: Real-time bioluminescent particle human skeleton with independent torso (teal) and neck (amber) articulation.
-- **Transports Supported**: Web Bluetooth (ESP32-WROOM, default), WebSockets (NodeMCU ESP8266), and Web Serial (USB, 115200 baud).
-- **Demo Mode**: Built-in interactive demo sliders and slouch simulation available without hardware.
+Open `http://localhost:8000` in Chrome or Edge:
+- **Wi-Fi (Default)**: Pick `spinealign.local` or `192.168.4.1 (AP)` on port `81` and click **Connect Wi-Fi**.
+- **Bluetooth**: Switch to the **Bluetooth** tab in the header or connection card to pair any compatible BLE device.
 
 ---
 
-## Software Tests
+## Tests
 
-Run the complete automated test suite:
 ```sh
-npm test
 npm run check
+npm test
 ```
-All 34 automated tests validate strict telemetry parsing, Bluetooth adapter chunking, 2nd-order critically damped 3D kinematics with 1:1 angular fidelity, NodeMCU/ESP32 pinouts, and credential protection.

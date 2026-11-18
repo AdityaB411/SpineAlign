@@ -111,6 +111,48 @@ a { color: inherit; text-decoration: none; }
 .header-center {
   display: flex;
   align-items: center;
+  gap: 10px;
+}
+
+.header-transport-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+}
+
+.header-transport-btn {
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 6px 11px;
+  min-height: 30px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.header-transport-btn:hover {
+  color: var(--ink);
+}
+
+.header-transport-btn.active {
+  background: #fff;
+  color: var(--primary-dark);
+  box-shadow: 0 1px 4px rgba(38, 51, 42, 0.1);
+}
+
+.header-transport-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 .connection-pill {
@@ -136,6 +178,17 @@ a { color: inherit; text-decoration: none; }
 .connection-pill.is-live .mini-status-dot {
   background: var(--good);
   box-shadow: 0 0 0 3px rgba(62, 129, 94, 0.2);
+}
+
+.connection-pill.is-reconnecting .mini-status-dot {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+  animation: reconnect-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes reconnect-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .header-actions {
@@ -168,12 +221,18 @@ a { color: inherit; text-decoration: none; }
 
 .button:active { transform: translateY(1px); }
 
+.button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .button-primary {
   background: var(--primary);
   color: #fff;
 }
 
-.button-primary:hover {
+.button-primary:hover:not(:disabled) {
   background: var(--primary-dark);
 }
 
@@ -183,7 +242,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--primary);
 }
 
-.button-secondary:hover {
+.button-secondary:hover:not(:disabled) {
   background: var(--line-light);
 }
 
@@ -192,7 +251,10 @@ a { color: inherit; text-decoration: none; }
 }
 
 .button-symbol {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 /* ==========================================================================
@@ -649,6 +711,54 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 8px var(--amber-glow);
 }
 
+/* Camera View Preset Pills */
+.camera-presets {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(8px);
+  z-index: 6;
+}
+
+.camera-preset-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 5px 10px;
+  min-height: 28px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+
+.camera-preset-btn:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.camera-preset-btn.active {
+  color: #f0fdfa;
+  background: rgba(6, 182, 212, 0.24);
+  border-color: rgba(94, 234, 212, 0.55);
+}
+
+.camera-preset-btn:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 2px;
+}
+
 .stage-footer-hint {
   position: absolute;
   bottom: 12px;
@@ -736,81 +846,8 @@ a { color: inherit; text-decoration: none; }
 
 .model-note p { margin: 0; }
 
-/* Posture Trend Chart */
-.trend-card h3 {
-  font-size: 15px;
-  font-weight: 800;
-  margin: 3px 0 0;
-}
-
-.chart-legend {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 11px;
-  color: var(--ink-soft);
-}
-
-.chart-legend span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.neck-legend { background: var(--amber); }
-.back-legend { background: var(--teal); }
-.threshold-legend-item strong { color: var(--coral); }
-
-.chart-wrap {
-  width: 100%;
-  height: 170px;
-  position: relative;
-  margin: 12px 0 8px;
-}
-
-#angleChart {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.chart-empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(255, 255, 255, 0.85);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.chart-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 10px;
-  color: var(--muted);
-  padding-top: 10px;
-  border-top: 1px solid var(--line-light);
-}
-
-.footer-live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--good);
-  display: inline-block;
-  margin-right: 6px;
-}
-
 /* ==========================================================================
-   Right Column: Device Connection, Battery & Test Sliders
+   Right Column: Wireless Connection & Battery
    ========================================================================== */
 .device-card h3 {
   font-size: 15px;
@@ -863,28 +900,39 @@ a { color: inherit; text-decoration: none; }
   border: 0;
   background: transparent;
   padding: 8px 6px;
-  min-height: 34px;
-  font-size: 10px;
+  min-height: 36px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--ink-soft);
   border-radius: 7px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
   text-align: center;
+}
+
+.transport-tab .tab-icon {
+  flex-shrink: 0;
+  opacity: 0.78;
 }
 
 .transport-tab:hover { color: var(--ink); }
 .transport-tab.active {
   background: #fff;
   color: var(--primary-dark);
-  box-shadow: 0 1px 4px rgba(38, 51, 42, 0.08);
+  box-shadow: 0 1px 4px rgba(38, 51, 42, 0.09);
 }
+.transport-tab.active .tab-icon { opacity: 1; }
 .transport-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
 /* Wi-Fi Configuration Panel */
 .wifi-config-panel {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
   margin-bottom: 12px;
   background: var(--surface-alt);
   border: 1px solid var(--line);
@@ -893,6 +941,55 @@ a { color: inherit; text-decoration: none; }
 }
 
 .wifi-config-panel[hidden] { display: none; }
+
+.wifi-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wifi-preset-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 4px 10px;
+  min-height: 28px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.wifi-preset-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
+.wifi-preset-btn.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+
+.wifi-preset-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.wifi-fields-row {
+  display: flex;
+  gap: 5px;
+  align-items: flex-end;
+}
+
+.wifi-protocol-group {
+  width: 62px;
+  flex: 0 0 62px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 .wifi-input-group {
   flex: 1;
@@ -903,8 +1000,8 @@ a { color: inherit; text-decoration: none; }
 }
 
 .wifi-port-group {
-  width: 68px;
-  flex: 0 0 68px;
+  width: 50px;
+  flex: 0 0 50px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -913,15 +1010,15 @@ a { color: inherit; text-decoration: none; }
 .wifi-label {
   font-size: 9px;
   font-weight: 800;
-  color: var(--muted);
-  letter-spacing: 0.6px;
+  color: var(--ink-soft);
+  letter-spacing: 0.5px;
   text-transform: uppercase;
 }
 
 .wifi-input {
   width: 100%;
   height: 34px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #fff;
@@ -931,11 +1028,49 @@ a { color: inherit; text-decoration: none; }
   box-sizing: border-box;
 }
 
+.wifi-select {
+  cursor: pointer;
+  padding-right: 4px;
+}
+
 .wifi-input:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(82, 117, 91, 0.18);
 }
+
+.wifi-reconnect-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.wifi-reconnect-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.transport-warning {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #fef6e7;
+  border: 1px solid #e7c98e;
+  color: #6b4c14;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.transport-warning[hidden] { display: none; }
 
 .device-info-list {
   display: flex;
@@ -1075,72 +1210,6 @@ a { color: inherit; text-decoration: none; }
 
 .battery-details-compact strong { color: var(--ink); }
 
-/* Controls Card (Test Preview Sliders) */
-.controls-card h3 {
-  font-size: 15px;
-  font-weight: 800;
-  margin: 3px 0 0;
-}
-
-.controls-subtitle {
-  margin: 4px 0 12px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.model-reset-button {
-  border: 0;
-  border-radius: 6px;
-  padding: 4px 8px;
-  background: var(--surface-alt);
-  border: 1px solid var(--line);
-  color: var(--primary);
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.model-reset-button:hover {
-  background: var(--line-light);
-}
-
-.slider-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.orientation-control {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  color: var(--ink-soft);
-  font-weight: 600;
-}
-
-.orientation-control output {
-  font-weight: 800;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.orientation-slider {
-  display: block;
-  width: 100%;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--teal);
-  cursor: pointer;
-}
-
-.orientation-slider.neck-slider { accent-color: var(--amber); }
-
-.orientation-slider:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 /* ==========================================================================
    Toast Notification
    ========================================================================== */
@@ -1190,17 +1259,27 @@ a { color: inherit; text-decoration: none; }
 .single-sensor-mode .neck-summary-card,
 .single-sensor-mode .joint-tag-neck,
 .single-sensor-mode .neck-orient,
-.single-sensor-mode .neck-device-row,
-.single-sensor-mode .chart-legend span:first-child {
+.single-sensor-mode .neck-device-row {
   display: none !important;
 }
 
 /* ==========================================================================
    Responsive Breakpoints
    ========================================================================== */
-@media (max-width: 1280px) {
+@media (max-width: 1360px) {
+  .top-header {
+    padding: 0 20px;
+  }
   .dashboard-main {
-    grid-template-columns: 270px minmax(0, 1fr);
+    grid-template-columns: 248px minmax(0, 1fr) 292px;
+    padding: 18px 20px 28px;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 1120px) {
+  .dashboard-main {
+    grid-template-columns: 260px minmax(0, 1fr);
   }
   .col-right {
     grid-column: 1 / -1;
@@ -1215,8 +1294,10 @@ a { color: inherit; text-decoration: none; }
     padding: 16px 18px 28px;
   }
   .top-header {
-    padding: 0 18px;
-    height: 64px;
+    padding: 10px 18px;
+    height: auto;
+    flex-wrap: wrap;
+    gap: 10px;
   }
   .canvas-stage {
     height: 380px;
@@ -1232,6 +1313,11 @@ a { color: inherit; text-decoration: none; }
     padding: 12px 14px;
     flex-wrap: wrap;
     gap: 10px;
+  }
+  .header-center {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
   }
   .header-actions {
     width: 100%;

@@ -6,17 +6,11 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 
-test('ESP32-WROOM firmware in root and physical wireless firmware support BLE and standard pinout', () => {
-  const rootFw = read('SpineAlign.ino');
-  const physicalCam = read('firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino');
-  assert.match(rootFw, /#define SDA_PIN 21/);
-  assert.match(rootFw, /#define SCL_PIN 22/);
-  assert.match(rootFw, /#include <BLEDevice\.h>/);
-  assert.match(rootFw, /67b7a001-9b7c-4eb7-a1a8-6b7f51a0a101/);
-  assert.match(physicalCam, /#include <BLEDevice\.h>/);
-  assert.match(physicalCam, /ArduinoOTA\.handle\(\)/);
-  assert.match(physicalCam, /Adafruit_ADS1X15\.h/);
-  assert.doesNotMatch(physicalCam, /analogReadMilliVolts|analogRead\(BATTERY_ADC_PIN\)/);
+test('repository contains NodeMCU firmware only and removes legacy ESP32 folders', () => {
+  assert.ok(fs.existsSync(path.join(root, 'firmware/SpineAlign_NodeMCU/SpineAlign_NodeMCU.ino')));
+  assert.equal(fs.existsSync(path.join(root, 'SpineAlign.ino')), false);
+  assert.equal(fs.existsSync(path.join(root, 'firmware/SpineAlign_ESP32WROOM')), false);
+  assert.equal(fs.existsSync(path.join(root, 'firmware/SpineAlign_ESP32CAM')), false);
 });
 
 test('dashboard script order loads transport and parser before application', () => {
@@ -26,42 +20,22 @@ test('dashboard script order loads transport and parser before application', () 
   assert.ok(html.indexOf('app.js') > html.indexOf('telemetry-protocol.js'));
 });
 
-test('native USB byte decoding and BLE adapter both preserve text chunks', () => {
+test('stream byte decoding and BLE adapter both preserve text chunks', () => {
   assert.match(read('app.js'), /decoder\.decode\(value, \{ stream: true \}\)/);
   const bridge = read('ble-serial-bridge.js');
   assert.match(bridge, /decoder\.decode\(bytes,\{stream:true\}\)/);
   assert.match(bridge, /writeValueWithResponse/);
 });
 
-test('firmware exposes telemetry, calibration, BLE security, OTA and separated ADC channels', () => {
-  const fw = read('firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino');
-  for (const text of ['BLEService','BLECharacteristic::PROPERTY_NOTIFY','CALIBRATE','ArduinoOTA.handle()',
-    'ESP_LE_AUTH_REQ_SC_BOND','BATTERY_ADC_CHANNEL=0','CHARGER_ADC_CHANNEL=1','RATE_ADS1115_860SPS','MODE:','SPINEALIGN_DUAL_IMU','NS:', 'BS:', 'CHG:'])
-    assert.ok(fw.includes(text), 'missing firmware element: ' + text);
+test('NodeMCU configuration is ignored and example credentials cannot be mistaken for real secrets', () => {
+  assert.match(read('firmware/SpineAlign_NodeMCU/.gitignore'), /config\.h/);
+  assert.match(read('firmware/SpineAlign_NodeMCU/config.example.h'), /REPLACE_ME/);
+  assert.match(read('firmware/SpineAlign_NodeMCU/SpineAlign_NodeMCU.ino'), /isPlaceholderCredential/);
 });
 
-test('OTA partition table has two non-overlapping slots within 4 MB flash', () => {
-  const csv = read('firmware/SpineAlign_ESP32CAM/partitions.csv');
-  const entries = csv.split(/\r?\n/).filter((line) => line.trim() && !line.trim().startsWith('#')).map((line) => {
-    const [name,type,subtype,offset,size] = line.split(',').map((v)=>v.trim());
-    return { name,type,subtype,offset: Number(offset),size: Number(size) };
-  });
-  assert.equal(entries.filter((x)=>x.subtype==='ota_0').length, 1);
-  assert.equal(entries.filter((x)=>x.subtype==='ota_1').length, 1);
-  const sorted=entries.slice().sort((a,b)=>a.offset-b.offset);
-  for (let i=1;i<sorted.length;i++) assert.ok(sorted[i-1].offset+sorted[i-1].size<=sorted[i].offset,'overlapping partitions');
-  assert.ok(Math.max(...entries.map((x)=>x.offset+x.size))<=0x400000,'partition table exceeds 4MB');
-});
-
-test('OTA configuration is ignored and example credentials cannot be mistaken for real secrets', () => {
-  assert.match(read('firmware/SpineAlign_ESP32CAM/.gitignore'), /config\.h/);
-  assert.match(read('firmware/SpineAlign_ESP32CAM/config.example.h'), /REPLACE_ME/);
-  assert.match(read('firmware/SpineAlign_ESP32CAM/SpineAlign_ESP32CAM.ino'), /isPlaceholderCredential/);
-});
-
-test('CI compiles physical sketch with its own build configuration and validates tests', () => {
-  const workflow=read('.github/workflows/arduino-build.yml');
-  assert.match(workflow,/npm|node --test/);
-  assert.match(workflow,/platformio|pio run/);
-  assert.match(workflow,/firmware\/SpineAlign_ESP32CAM/);
+test('CI compiles NodeMCU firmware with PlatformIO and validates tests', () => {
+  const workflow = read('.github/workflows/arduino-build.yml');
+  assert.match(workflow, /npm test/);
+  assert.match(workflow, /npm run check/);
+  assert.match(workflow, /pio run -d firmware\/SpineAlign_NodeMCU/);
 });

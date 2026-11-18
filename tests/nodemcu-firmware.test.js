@@ -7,20 +7,53 @@ const telemetry = require('../telemetry-protocol.js');
 const root = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 
-test('NodeMCU firmware targets ESP8266 architecture with dedicated standard pins', () => {
+test('NodeMCU firmware targets ESP8266 Wi-Fi-only architecture with dedicated standard pins', () => {
   const fw = read('firmware/SpineAlign_NodeMCU/SpineAlign_NodeMCU.ino');
-  // ESP8266 includes
+  // ESP8266 Wi-Fi-only includes
   assert.match(fw, /#include <ESP8266WiFi\.h>/);
   assert.match(fw, /#include <WebSocketsServer\.h>/);
   assert.match(fw, /#include <ESP8266WebServer\.h>/);
-  assert.match(fw, /#include <ArduinoOTA\.h>/);
-  // Must NOT include ESP32-only BLE headers
+  // Must NOT include ESP32 BLE, OLED, or OTA headers in minimal Wi-Fi-only build
   assert.doesNotMatch(fw, /#include <BLEDevice\.h>/);
+  assert.doesNotMatch(fw, /#include <Adafruit_SSD1306\.h>/);
+  assert.doesNotMatch(fw, /#include <ArduinoOTA\.h>/);
+  assert.match(fw, /webSocket\.broadcastTXT\(line\.c_str\(\),\s*line\.length\(\)\)/);
 
-  // Standard NodeMCU pin assignments: D2=GPIO4 (SDA), D1=GPIO5 (SCL), D5=GPIO14 (Alert)
+  // Dedicated boot-safe NodeMCU pin assignments for both MPUs + Alert:
+  // MPU #1 (Neck): D2=GPIO4 (SDA), D1=GPIO5 (SCL)
+  // MPU #2 (Back): D6=GPIO12 (SDA), D7=GPIO13 (SCL)
+  // Alert:         D5=GPIO14
   assert.match(fw, /#define SDA_PIN 4/);
   assert.match(fw, /#define SCL_PIN 5/);
+  assert.match(fw, /#define BACK_SDA_PIN 12/);
+  assert.match(fw, /#define BACK_SCL_PIN 13/);
   assert.match(fw, /#define ALERT_PIN 14/);
+  assert.match(fw, /selectI2CBus\(/);
+
+  // Supports Auto-detect (-1), Single IMU (0), and Dual IMU (1)
+  assert.match(fw, /#define SPINEALIGN_DUAL_IMU -1/);
+  assert.match(fw, /detectAndInitIMUs\(\)/);
+  assert.match(fw, /dualImuActive/);
+
+  // Low-latency Wi-Fi & 200 Hz IMU / 25 Hz telemetry optimizations
+  assert.match(fw, /WiFi\.setSleepMode\(WIFI_NONE_SLEEP\)/);
+  assert.match(fw, /Wire\.setClock\(400000\)/);
+  assert.match(fw, /SENSOR_INTERVAL_MS\s*=\s*5;/);
+  assert.match(fw, /TELEMETRY_INTERVAL_MS\s*=\s*40;/);
+
+  // Singularity-free auto-mounting axis orientation (flat & vertical) + gyro bias calibration
+  assert.match(fw, /MOUNT_FLAT_Z/);
+  assert.match(fw, /MOUNT_VERT_X/);
+  assert.match(fw, /MOUNT_VERT_Y/);
+  assert.match(fw, /computeAnglesAndRates/);
+  assert.match(fw, /calibrateSingleSensor/);
+
+  // Reliability & dashboard compatibility hardening
+  assert.match(fw, /webSocket\.enableHeartbeat\(/);
+  assert.match(fw, /recoverI2CBus\(/);
+  assert.match(fw, /WiFi\.setAutoReconnect\(true\)/);
+  assert.match(fw, /isfinite\(/);
+  assert.doesNotMatch(fw, /while\s*\(digitalRead\(CALIBRATION_BUTTON_PIN\)\s*==\s*LOW\)/);
 });
 
 test('NodeMCU firmware configures WebSockets on port 81 and HTTP on port 80 with AP fallback', () => {
